@@ -1,0 +1,9 @@
+{application, korrpcdid, [
+  {description, "KorRPC dispatcher daemon"},
+  {vsn, "0.0.0"}, % remember about `overview.edoc'
+  {registered, []},
+  {applications, [kernel, stdlib, ssl]},
+  %{mod, { korrpcdid_app, []}}, % callback module
+  {env, []}
+]}.
+% vim:ft=erlang
