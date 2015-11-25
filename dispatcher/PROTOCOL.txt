@@ -1,0 +1,141 @@
+==========================
+KorRPC dispatcher protocol
+==========================
+
+Protocol is based on a line-wise JSON. Each message is serialized to a single
+line. The protocol is asynchronous: client receives job ID in response to
+a call request and is expected to check status of the job later.
+
+----------------------
+Client-side operations
+----------------------
+
+Call request
+~~~~~~~~~~~~
+
+  {"korrpcdid": 1, "host": "...", "procedure": "...", "arguments": []}
+  {"korrpcdid": 1, "host": "...", "procedure": "...", "arguments": [...]}
+  {"korrpcdid": 1, "host": "...", "procedure": "...", "arguments": {...}}
+  {"korrpcdid": 1, ..., "timeout": integer, "max_exec_time": integer}
+
+Call may either use positional arguments or named arguments.
+Call with no arguments is indicated with an empty list.
+
+Request may set timeout, maximum execution time, or both. Timeout is maximum
+time allowed between consequent messages (mainly: time when next stream
+message is expected); maximum execution time is total time between issuing
+a call request and receiving result. For procedures that do not stream their
+result, the two are equivalent.
+
+Reply:
+  {"korrpcdid": 1, "job_id": "..."}
+
+
+Job cancellation
+~~~~~~~~~~~~~~~~
+
+  {"korrpcdid": 1, "cancel": "..."}
+
+Value of "cancel" field is job ID.
+
+Reply:
+  {"cancelled": true | false}
+
+True is returned if the job was running and was stopped.
+False is returned if the job was terminated already or not existent at all.
+
+
+Receiving call result
+~~~~~~~~~~~~~~~~~~~~~
+
+  {"korrpcdid": 1, "get_result": "..."}
+  {"korrpcdid": 1, "get_result": "...", "wait": true | false}
+
+Value of "get_result" is job ID.
+
+"wait" field set to false indicates that the dispatcher should reply
+immediately, even if the job didn't finish yet. "wait" set to true is
+equivalent to not specifying it at all.
+
+Reply:
+  {"no_result": true}
+      call not terminated yet (only relevant to "wait":false)
+  {"result": ...}
+      call returned successfully
+  {"exception": {"type": "...", "message": "...", "data": ...}}
+      call returned with an exception
+      "type" is the kind of the exception, "message" contains human-readable
+      description, "data" is a (preferably structured) information to help
+      troubleshooting; "data" field is optional
+  {"cancelled": true}
+      job was cancelled before it returned any value
+  {"error": {"type": "os_error", "message": "..."}}
+      connection to KorRPC daemon failed because of an error on OS side
+  {"error": {"type": "network_error", "message": "..."}}
+      connection to KorRPC daemon failed because of a network error
+      (connection refused, connection broken, network timeout, etc.)
+  {"error": {"type": "protocol_error", "message": "..."}}
+      KorRPC daemon responded to dispatcher's request with garbage
+
+
+Reading result stream
+~~~~~~~~~~~~~~~~~~~~~
+
+  {"korrpcdid": 1, "follow_stream": "..."}
+  {"korrpcdid": 1, "follow_stream": "...", "recent": integer}
+  {"korrpcdid": 1, "follow_stream": "...", "since": integer}
+
+Value of "follow_stream" is job ID.
+
+This request is used mainly to receive continuous stream of packets that call
+produces, as soon as they are produced.
+
+"recent" specifies how many messages already collected by dispatcher should
+be returned additionally to all messages from now on, so the client can build
+some context from the stream.
+
+"since" specifies the first packet to return. Value of 0 returns all the
+stream. "since" and "recent" fields are mutually exclusive.
+
+Providing neither "recent" nor "since" has the same meaning as specifying
+"recent":0.
+
+Reply is a stream of messages, one at a line:
+  {"packet": integer, "data": ...}
+
+Packet number is a number incremented by 1 for each packet, with 0 being the
+first packet in job's stream (that is, it's an absolute position). This is the
+identifier to be used in "since" field.
+
+The end of stream is indicated by message carrying a call result (either value
+or exception), information of the job being cancelled, or an error. In other
+words, any of the replies to "get_result" except "no_result".
+
+
+Reading result stream page-wise
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  {"korrpcdid": 1, "read_stream": "..."}
+  {"korrpcdid": 1, "read_stream": "...", "recent": integer}
+  {"korrpcdid": 1, "read_stream": "...", "since": integer}
+
+Value of "read_stream" is job ID.
+
+This request is used mainly to read a sequence of packets produced until now,
+and then, after an interval, read the next portion of packets with next
+request. This mode of operation should be easier to use in a web application
+than "follow_stream".
+
+Fields "recent" and "since" have the same meaning as for "follow_stream"
+request.
+
+Providing neither "recent" nor "since" has the same meaning as specifying
+"since":0 (note: difference from "follow_stream" request).
+
+Reply is a stream of messages, one at a line, the same as in "follow_stream",
+with a one additional message that can terminate stream:
+  {"continue": true}
+
+This message indicates that all the currently available stream packets were
+returned, but the job hasn't terminated yet, so there's still something to
+read in the future (call result at least).
