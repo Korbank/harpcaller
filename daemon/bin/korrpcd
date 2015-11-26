@@ -1,0 +1,88 @@
+#!/usr/bin/python
+
+import korrpcd
+import optparse
+import logging
+import logging.config
+import yaml
+import signal
+import sys
+
+#-----------------------------------------------------------------------------
+# parse command line options {{{
+
+parser = optparse.OptionParser(
+    usage = "%prog [options]"
+)
+
+parser.add_option(
+    "-c", "--config", dest = "config", default = "/etc/korrpc/korrpcd.conf",
+    help = "configuration file", metavar = "FILE",
+)
+parser.add_option(
+    "-l", "--logging", dest = "logging",
+    help = "YAML/JSON file with logging configuration", metavar = "FILE",
+)
+
+(options, args) = parser.parse_args()
+
+#if len(args) == 0:
+#    parser.error("argument not provided")
+
+# }}}
+#-----------------------------------------------------------------------------
+# logging {{{
+
+if options.logging is not None:
+    logging_config = yaml.safe_load(options.logging)
+else:
+    logging_config = {
+        "version": 1,
+        "root": { "level": "INFO", "handlers": ["stderr"] },
+        "formatters": {
+            "terse": { "format": "%(message)s" },
+            "timestamped": {
+                "format": "%(asctime)s %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S",
+            },
+        },
+        "handlers": {
+            "stderr": {
+                "class": "logging.StreamHandler",
+                "formatter": "terse",
+                "stream": "ext://sys.stderr",
+            },
+        },
+    }
+
+logging.config.dictConfig(logging_config)
+
+# }}}
+#-----------------------------------------------------------------------------
+
+# TODO: move signal handler to korrpcd.SSLServer class
+
+def quit_daemon(sig, stack_frame):
+    import os
+    print "<$$=%d> got signal %d, exiting" % (os.getpid(), sig)
+    # FIXME: if a child still waits for reading from the other end (in
+    # korrpcd.RequestHandler.handle()) when ^C was hit on terminal, this child
+    # gives ugly traceback instead of simply quitting
+    sys.exit(0)
+signal.signal(signal.SIGINT, quit_daemon)
+
+# TODO: forward the signal to children (SSLServer.active_children is a list of
+# PIDs or `None')
+
+#-----------------------------------------------------------------------------
+
+# TODO: change the bind address, port, and files (and add CA)
+server = korrpcd.SSLServer(
+    host = None, port = 1638,
+    cert_file = "../_ssl/korrpcd.cert.pem",
+    key_file  = "../_ssl/korrpcd.key.pem",
+)
+server.serve_forever()
+
+#-----------------------------------------------------------------------------
+# vim:ft=python:foldmethod=marker
