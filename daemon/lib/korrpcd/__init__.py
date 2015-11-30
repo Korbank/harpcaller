@@ -12,6 +12,93 @@ import os # temporary, for os.getpid()
 # TODO: use logging
 
 #-----------------------------------------------------------------------------
+# decorator for streaming results {{{
+
+class StreamedResult(object):
+    def __init__(self, function):
+        self.function = function
+
+    def __call__(self, *args, **kwargs):
+        return self.function(*args, **kwargs)
+
+    def result(self):
+        # method to be replaced by a subclass, so the procedure can return
+        # stream and a value at the same time
+        return None
+
+def streamed(function):
+    # the function could be simply `streamed = StreamedResult', but this way
+    # is more readable
+    return StreamedResult(function)
+
+# }}}
+#-----------------------------------------------------------------------------
+# stub for user-supplied procedures {{{
+
+import time
+
+def return_immediate(*args, **kwargs):
+    if len(kwargs) > 0:
+        return {
+            "call_type": "kwargs",
+            "args_count": len(kwargs),
+            "delayed": False,
+        }
+    else:
+        return {
+            "call_type": "args",
+            "args_count": len(args),
+            "delayed": False,
+        }
+
+def return_delayed(*args, **kwargs):
+    time.sleep(10)
+
+    if len(kwargs) > 0:
+        return {
+            "call_type": "kwargs",
+            "args_count": len(kwargs),
+            "delayed": False,
+        }
+    else:
+        return {
+            "call_type": "args",
+            "args_count": len(args),
+            "delayed": False,
+        }
+
+@streamed
+def stream_immediate(*args, **kwargs):
+    for i in xrange(1, 10):
+        yield {"packet": i, "letter": chr(ord('A') - 1 + i), "delayed": False}
+        time.sleep(1)
+    yield {"packet": i, "letter": chr(ord('a') - 1 + 10), "delayed": False}
+
+@streamed
+def stream_delayed(*args, **kwargs):
+    time.sleep(10)
+    for i in xrange(1, 10):
+        yield {"packet": i, "letter": chr(ord('A') - 1 + i), "delayed": True}
+        time.sleep(1)
+    yield {"packet": i, "letter": chr(ord('a') - 1 + 10), "delayed": True}
+
+@streamed
+def stream_infinity(*args, **kwargs):
+    time.sleep(5)
+    while True:
+        yield {"current_time": int(time.time())}
+        time.sleep(1)
+
+_PROCEDURES = {
+    "return_immediate": return_immediate,
+    "return_delayed":   return_delayed,
+    "stream_immediate": stream_immediate,
+    "stream_delayed":   stream_delayed,
+    "stream_infinity":  stream_infinity,
+}
+
+# }}}
+#-----------------------------------------------------------------------------
 
 # TODO: do something useful here, like calling loaded functions
 class RequestHandler(SocketServer.BaseRequestHandler, object):
@@ -49,11 +136,36 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         self.request.write("[$$=%d] hello\n" % (os.getpid()))
 
         try:
-            (proc, args) = self.read_request()
-            print "[$$=%d] got call %s%s" % (os.getpid(), proc, args)
-            self.request.write("[$$=%d] bye\n" % (os.getpid()))
+            (proc_name, arguments) = self.read_request()
+            print "[$$=%d] got call %s%s" % (os.getpid(), proc_name, arguments)
         except RequestHandler.RequestError, e:
             self.send(e.struct())
+
+        # TODO: better procedure lookup
+        proc = _PROCEDURES[proc_name]
+
+        if isinstance(arguments, (list, tuple)):
+            args = arguments
+            kwargs = {}
+        elif isinstance(arguments, dict):
+            args = ()
+            kwargs = arguments
+        else:
+            return # TODO: signal an error
+
+        # TODO: try-catch exceptions from call
+        # TODO: try-catch exceptions from serializing results
+        # TODO: intercept "broken pipe" situation and terminate early
+        if isinstance(proc, StreamedResult):
+            self.send({"korrpc": 1, "stream_result": True})
+            for packet in proc(*args, **kwargs):
+                self.send({"stream": packet})
+            self.send({"result": proc.result()})
+        else:
+            self.send({"korrpc": 1, "stream_result": False})
+            self.send({"result": proc(*args, **kwargs)})
+
+        self.request.write("[$$=%d] bye\n" % (os.getpid()))
 
     def finish(self):
         pass
@@ -93,6 +205,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             raise RequestHandler.RequestError("invalid_request", str(e))
 
     def send(self, data):
+        # TODO: intercept "broken pipe"
         self.request.write(json.dumps(data, sort_keys = True) + "\n")
 
 #-----------------------------------------------------------------------------
