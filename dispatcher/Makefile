@@ -7,18 +7,21 @@ DIALYZER_OPTS = --no_check_plt $(foreach D,$(DIALYZER_PLT),--plt $D)
 
 #-----------------------------------------------------------------------------
 
-.PHONY: all doc edoc compile build dialyzer
+.PHONY: all doc edoc compile build clean dialyzer
 
 all: compile doc
 
-doc edoc:
-	rebar doc
+build: compile
+edoc: doc
 
-compile build:
-	rebar compile
+compile clean doc:
+	rebar $@
 
+YECC_ERL_FILES = $(subst .yrl,.erl,$(subst .xrl,.erl,$(wildcard src/*.[xy]rl)))
+ERL_SOURCE_FILES = $(filter-out $(YECC_ERL_FILES),$(wildcard src/*.erl))
 dialyzer:
-	dialyzer $(strip $(DIALYZER_OPTS)) --src src
+	@echo "dialyzer $(strip $(DIALYZER_OPTS)) --src src/*.erl"
+	@dialyzer $(strip $(DIALYZER_OPTS)) --src $(ERL_SOURCE_FILES)
 
 #-----------------------------------------------------------------------------
 # vim:ft=make
