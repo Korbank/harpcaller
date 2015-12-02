@@ -2,7 +2,7 @@
   {description, "KorRPC dispatcher daemon"},
   {vsn, "0.0.0"}, % remember about `overview.edoc'
   {registered, []},
-  {applications, [kernel, stdlib, ssl]},
+  {applications, [kernel, stdlib, ssl, crypto]},
   %{mod, { korrpcdid_app, []}}, % callback module
   {env, []}
 ]}.
