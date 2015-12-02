@@ -58,13 +58,13 @@ def return_delayed(*args, **kwargs):
         return {
             "call_type": "kwargs",
             "args_count": len(kwargs),
-            "delayed": False,
+            "delayed": True,
         }
     else:
         return {
             "call_type": "args",
             "args_count": len(args),
-            "delayed": False,
+            "delayed": True,
         }
 
 @streamed
@@ -133,13 +133,14 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         #   SSLServer.get_request())
         # self.server (SSLServer instance)
         print "[$$=%d] request handler!" % (os.getpid())
-        self.request.write("[$$=%d] hello\n" % (os.getpid()))
+        #self.request.write("[$$=%d] hello\n" % (os.getpid()))
 
         try:
             (proc_name, arguments) = self.read_request()
             print "[$$=%d] got call %s%s" % (os.getpid(), proc_name, arguments)
         except RequestHandler.RequestError, e:
             self.send(e.struct())
+            return
 
         # TODO: better procedure lookup
         proc = _PROCEDURES[proc_name]
@@ -165,14 +166,20 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             self.send({"korrpc": 1, "stream_result": False})
             self.send({"result": proc(*args, **kwargs)})
 
-        self.request.write("[$$=%d] bye\n" % (os.getpid()))
+        #self.request.write("[$$=%d] bye\n" % (os.getpid()))
 
     def finish(self):
         pass
 
     def read_request(self):
         # TODO: catch read errors
-        read_buffer = self.request.read(self.server.max_line)
+        read_buffer = []
+        fragment = self.request.read(self.server.max_line)
+        while "\n" not in fragment and fragment != "":
+            read_buffer.append(fragment)
+            fragment = self.request.read(self.server.max_line)
+        read_buffer.append(fragment)
+        read_buffer = "".join(read_buffer)
         if read_buffer == "": # EOF
             return None
 
