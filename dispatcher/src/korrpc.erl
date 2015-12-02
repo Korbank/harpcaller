@@ -38,6 +38,15 @@
 %%   raises an exception. Other errors (typically transport-related) are
 %%   returned as {@type {error,error_description()|term()@}}.
 %%
+%%   Available options:
+%%
+%%   <ul>
+%%     <li>{@type {host, inet:hostname() | inet:ip_address()@}} (required)</li>
+%%     <li>{@type {port, inet:port_number()@}} (required)</li>
+%%     <li>{@type {cafile, file:name()@}}</li>
+%%     <li>{@type {timeout, timeout()@}}</li>
+%%   </ul>
+%%
 %% @see request/3
 
 -spec call(procedure(), [argument()], list()) ->
@@ -60,6 +69,13 @@ call(Procedure, Arguments, Options) when is_binary(Procedure) ->
         {ok, [{<<"result">>, Result}]} ->
           ssl_close(Conn),
           {ok, Result};
+        {ok, [{<<"exception">>, ExceptionDesc}]} ->
+          ssl_close(Conn),
+          case format_error(ExceptionDesc) of
+            {_,_,_} = Exception -> {exception, Exception};
+            {_,_}   = Exception -> {exception, Exception};
+            _ -> {error, bad_protocol}
+          end;
         {ok, _Any} ->
           ssl_close(Conn),
           {error, bad_protocol};
@@ -83,6 +99,9 @@ call(Procedure, Arguments, Options) when is_binary(Procedure) ->
 %%   raises an exception. Other errors (typically transport-related) are
 %%   returned as {@type {error,error_description()|term()@}}.
 %%
+%%   Recognized options are described in {@link call/3}.
+%%
+%% @see call/3
 %% @see recv/1
 %% @see cancel/1
 
@@ -93,8 +112,17 @@ request(Procedure, Arguments, Options) when is_list(Procedure) ->
   request(list_to_binary(Procedure), Arguments, Options);
 request(Procedure, Arguments, Options) when is_atom(Procedure) ->
   request(atom_to_binary(Procedure, unicode), Arguments, Options);
-request(_Procedure, _Arguments, _Options) ->
-  'TODO'.
+request(Procedure, Arguments, Options) ->
+  Host = proplists:get_value(host, Options),
+  Port = proplists:get_value(port, Options),
+  CAFile = proplists:get_value(cafile, Options),
+  Timeout = proplists:get_value(timeout, Options, infinity),
+  case send_request_1(Procedure, Arguments, Host, Port, CAFile, Timeout) of
+    {ok, Conn, _ResultType} ->
+      {ok, Conn};
+    {error, Reason} ->
+      {error, Reason}
+  end.
 
 %%----------------------------------------------------------
 %% sequence of operations to send call request {{{
@@ -125,16 +153,11 @@ send_request_3(Conn, Acknowledgement) ->
       {ok, Conn, single_return};
     %{"korrpc": 1, "error": {"type": "...", "message": "...", "data": ...}}
     [{<<"korrpc">>, 1}, {<<"error">>, ErrorDesc}] ->
-      case ErrorDesc of
-        [{<<"data">>, Data}, {<<"message">>, Message}, {<<"type">>, Type}]
-        when is_binary(Type), is_binary(Message) ->
-          {error, {Type, Message, Data}};
-        [{<<"message">>, Message}, {<<"type">>, Type}]
-        when is_binary(Type), is_binary(Message) ->
-          {error, {Type, Message}};
-        _Any ->
-          % TODO: info what was returned
-          {error, bad_protocol}
+      case format_error(ErrorDesc) of
+        {_,_,_} = Error -> {error, Error};
+        {_,_}   = Error -> {error, Error};
+        % TODO: info what was returned
+        _Any -> {error, bad_protocol}
       end;
     _Any ->
       % TODO: info what was returned
@@ -173,17 +196,39 @@ recv(Handle) ->
 %%       (e.g. connection closed abruptly)</li>
 %%   </ul>
 %%
+%%   If `Timeout' was less than `infinity' and expires, call returns atom
+%%   `timeout'.
+%%
 %% @see request/3
 %% @see cancel/1
 
 -spec recv(stream_handle(), timeout()) ->
-    {packet, korrpc_json:struct()}
+    timeout
+  | {packet, korrpc_json:struct()}
   | {result, korrpc_json:struct()}
   | {exception, error_description()}
   | {error, error_description() | term()}.
 
-recv(_Handle, _Timeout) ->
-  'TODO'.
+recv(Handle, Timeout) ->
+  case ssl_recv(Handle, Timeout) of
+    {ok, [{<<"stream">>, Packet}]} ->
+      {packet, Packet};
+    {ok, [{<<"result">>, Result}]} ->
+      ssl_close(Handle),
+      {result, Result};
+    {ok, [{<<"exception">>, ExceptionDesc}]} ->
+      ssl_close(Handle),
+      case format_error(ExceptionDesc) of
+        {_,_,_} = Exception -> {exception, Exception};
+        {_,_}   = Exception -> {exception, Exception};
+        _ -> {error, bad_protocol}
+      end;
+    {error, timeout} ->
+      timeout;
+    {error, Reason} ->
+      ssl_close(Handle),
+      {error, Reason}
+  end.
 
 %% @doc Cancel a call request created with {@link request/3}.
 %%
@@ -264,6 +309,23 @@ ssl_recv(Conn, Timeout) ->
     {error, Reason} ->
       {error, Reason}
   end.
+
+%%%---------------------------------------------------------------------------
+
+%% @doc Format error/exception description from KorRPC protocol.
+
+-spec format_error(term()) ->
+  error_description() | bad_format.
+
+format_error([{<<"data">>, Data}, {<<"message">>, Message},
+               {<<"type">>, Type}] = _ErrorDesc)
+when is_binary(Type), is_binary(Message) ->
+  {Type, Message, Data};
+format_error([{<<"message">>, Message}, {<<"type">>, Type}] = _ErrorDesc)
+when is_binary(Type), is_binary(Message) ->
+  {Type, Message};
+format_error(_ErrorDesc) ->
+  bad_format.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
