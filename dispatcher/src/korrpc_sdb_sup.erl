@@ -19,6 +19,10 @@
 -export([init/1]).
 
 %%%---------------------------------------------------------------------------
+
+-include("korrpc_sdb.hrl").
+
+%%%---------------------------------------------------------------------------
 %%% public interface
 %%%---------------------------------------------------------------------------
 
@@ -51,6 +55,10 @@ init([] = _Args) ->
     {undefined, {korrpc_sdb, start_link, []},
       temporary, 1000, worker, [korrpc_sdb]}
   ],
+  ?ETS_REGISTRY_TABLE = ets:new(?ETS_REGISTRY_TABLE, [
+    named_table, public, set,
+    {write_concurrency, true}, {read_concurrency, true}
+  ]),
   {ok, {Strategy, Children}}.
 
 %%%---------------------------------------------------------------------------

@@ -19,7 +19,7 @@
 -export([code_change/3]).
 
 %% public interface
--export([new/4, close/1]).
+-export([new/4, load/1, close/1]).
 -export([insert/2, set_result/2]).
 -export([result/1, stream/2]).
 
@@ -29,6 +29,7 @@
 %%% type specification/documentation {{{
 
 -record(state, {
+  table_name,
   data :: ets:tab(), % in future: dets:tab_name()
   stream_counter = 0,
   finished :: boolean(),
@@ -40,6 +41,8 @@
 
 -type table_name() :: string().
 %% UUID string representation.
+
+-include("korrpc_sdb.hrl").
 
 % }}}
 %%%---------------------------------------------------------------------------
@@ -59,6 +62,17 @@ new(TableName, Procedure, ProcArgs, RemoteAddress) ->
   Args = [TableName, Procedure, ProcArgs, RemoteAddress, self()],
   {ok, Pid} = korrpc_sdb_sup:spawn_child(Args),
   {ok, Pid}.
+
+%% @doc Load an existing table.
+
+-spec load(table_name()) ->
+  {ok, handle()} | {error, term()}.
+
+load(TableName) ->
+  case ets:lookup(?ETS_REGISTRY_TABLE, TableName) of
+    [{TableName, Pid}] -> {ok, Pid};
+    [] -> {error, enoent}
+  end.
 
 %% @doc Close table handle.
 
@@ -164,22 +178,25 @@ start_link(TableName, Procedure, ProcArgs, RemoteAddress, Owner) ->
 %% @private
 %% @doc Initialize event handler.
 
-init([_TableName, _Procedure, _ProcArgs, _RemoteAddress, Owner] = _Args) ->
+init([TableName, _Procedure, _ProcArgs, _RemoteAddress, Owner] = _Args) ->
   link(Owner),
   MonRef = monitor(process, Owner),
   StreamTable = ets:new(stream_data, [ordered_set]),
   State = #state{
+    table_name = TableName,
     data = StreamTable,
     finished = false,
     owner = {Owner, MonRef}
   },
+  ets:insert(?ETS_REGISTRY_TABLE, {TableName, self()}),
   {ok, State}.
 
 %% @private
 %% @doc Clean up after event handler.
 
-terminate(_Arg, _State = #state{data = StreamTable}) ->
+terminate(_Arg, _State = #state{data = StreamTable, table_name = TableName}) ->
   ets:delete(StreamTable),
+  ets:delete(?ETS_REGISTRY_TABLE, TableName),
   ok.
 
 %% }}}
