@@ -1,19 +1,34 @@
 %%%---------------------------------------------------------------------------
 %%% @private
 %%% @doc
-%%%   KorRPC dispatcher top-level supervisor.
+%%%   Supervisor for client connection workers.
 %%% @end
 %%%---------------------------------------------------------------------------
 
--module(korrpcdid_sup).
+-module(korrpcdid_tcp_worker_sup).
 
 -behaviour(supervisor).
+
+%% public interface
+-export([spawn_worker/1]).
 
 %% supervision tree API
 -export([start_link/0]).
 
 %% supervisor callbacks
 -export([init/1]).
+
+%%%---------------------------------------------------------------------------
+%%% public interface
+%%%---------------------------------------------------------------------------
+
+%% @doc Spawn a new worker process.
+
+-spec spawn_worker(gen_tcp:socket()) ->
+  {ok, pid()} | {error, term()}.
+
+spawn_worker(Socket) ->
+  supervisor:start_child(?MODULE, [Socket]).
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
@@ -33,12 +48,10 @@ start_link() ->
 %% @doc Initialize supervisor.
 
 init([] = _Args) ->
-  Strategy = {one_for_one, 5, 10},
+  Strategy = {simple_one_for_one, 5, 10},
   Children = [
-    {korrpc_sdb_sup, {korrpc_sdb_sup, start_link, []},
-      permanent, 1000, worker, [korrpc_sdb_sup]},
-    {korrpcdid_tcp_sup, {korrpcdid_tcp_sup, start_link, []},
-      permanent, 1000, supervisor, [korrpcdid_tcp_sup]}
+    {undefined, {korrpcdid_tcp_worker, start_link, []},
+      temporary, 1000, worker, [korrpcdid_tcp_worker]}
   ],
   {ok, {Strategy, Children}}.
 

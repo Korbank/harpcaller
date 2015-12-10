@@ -1,11 +1,11 @@
 %%%---------------------------------------------------------------------------
 %%% @private
 %%% @doc
-%%%   KorRPC dispatcher top-level supervisor.
+%%%   TCP subsystem supervisor.
 %%% @end
 %%%---------------------------------------------------------------------------
 
--module(korrpcdid_sup).
+-module(korrpcdid_tcp_sup).
 
 -behaviour(supervisor).
 
@@ -34,13 +34,18 @@ start_link() ->
 
 init([] = _Args) ->
   Strategy = {one_for_one, 5, 10},
-  Children = [
-    {korrpc_sdb_sup, {korrpc_sdb_sup, start_link, []},
-      permanent, 1000, worker, [korrpc_sdb_sup]},
-    {korrpcdid_tcp_sup, {korrpcdid_tcp_sup, start_link, []},
-      permanent, 1000, supervisor, [korrpcdid_tcp_sup]}
+  {ok, ListenAddrs} = application:get_env(listen),
+  Listeners = [
+    {{korrpcdid_tcp_listener, Addr},
+      {korrpcdid_tcp_listener, start_link, [Addr]},
+      permanent, 1000, worker, [korrpcdid_tcp_listener]} ||
+    Addr <- ListenAddrs
   ],
-  {ok, {Strategy, Children}}.
+  Children = [
+    {korrpcdid_tcp_worker_sup, {korrpcdid_tcp_worker_sup, start_link, []},
+      permanent, 1000, supervisor, [korrpcdid_tcp_worker_sup]}
+  ],
+  {ok, {Strategy, Children ++ Listeners}}.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
