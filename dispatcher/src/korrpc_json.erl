@@ -26,7 +26,8 @@
 
 -type jhash() :: [{ jstring(), struct() }, ...] | [{}].
 %% Hash node. Literal `[{}]' represents an empty hash. If the hash is
-%% non-empty, it's a non-empty list of 2-tuples.
+%% non-empty, it's a non-empty, ordered list of 2-tuples, compatible with
+%% {@link orddict}.
 
 -type jarray() :: [struct()].
 
