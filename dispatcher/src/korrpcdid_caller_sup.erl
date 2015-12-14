@@ -1,5 +1,4 @@
 %%%---------------------------------------------------------------------------
-%%% @private
 %%% @doc
 %%%   KorRPC daemon calling subsystem supervisor.
 %%% @end

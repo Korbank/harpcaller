@@ -1,5 +1,4 @@
 %%%---------------------------------------------------------------------------
-%%% @private
 %%% @doc
 %%%   Supervisor for client connection workers.
 %%% @end

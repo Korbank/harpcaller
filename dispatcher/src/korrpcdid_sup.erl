@@ -1,5 +1,4 @@
 %%%---------------------------------------------------------------------------
-%%% @private
 %%% @doc
 %%%   KorRPC dispatcher top-level supervisor.
 %%% @end

@@ -1,5 +1,4 @@
 %%%---------------------------------------------------------------------------
-%%% @private
 %%% @doc
 %%%   Client connection worker initializer.
 %%%   A process running this module reads a single JSON message from its TCP
