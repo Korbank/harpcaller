@@ -30,13 +30,13 @@
 %%%---------------------------------------------------------------------------
 
 %% @private
-%% @doc Start example process.
+%% @doc Start acceptor process.
 
 start({Addr, Port} = _ListenSpec) ->
   gen_server:start(?MODULE, [Addr, Port], []).
 
 %% @private
-%% @doc Start example process.
+%% @doc Start acceptor process.
 
 start_link({Addr, Port} = _ListenSpec) ->
   gen_server:start_link(?MODULE, [Addr, Port], []).

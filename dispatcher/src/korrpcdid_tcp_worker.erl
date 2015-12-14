@@ -56,13 +56,13 @@
 %%%---------------------------------------------------------------------------
 
 %% @private
-%% @doc Start example process.
+%% @doc Start worker process.
 
 start(Socket) ->
   gen_server:start(?MODULE, [Socket], []).
 
 %% @private
-%% @doc Start example process.
+%% @doc Start worker process.
 
 start_link(Socket) ->
   gen_server:start_link(?MODULE, [Socket], []).

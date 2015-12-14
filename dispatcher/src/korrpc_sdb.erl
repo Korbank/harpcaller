@@ -155,14 +155,14 @@ stream(Handle, Seq) when is_integer(Seq), Seq >= 0 ->
 %%%---------------------------------------------------------------------------
 
 %% @private
-%% @doc Start example process.
+%% @doc Start stream DB process.
 
 start(TableName, Procedure, ProcArgs, RemoteAddress, Owner) ->
   Args = [TableName, Procedure, ProcArgs, RemoteAddress, Owner],
   gen_server:start(?MODULE, Args, []).
 
 %% @private
-%% @doc Start example process.
+%% @doc Start stream DB process.
 
 start_link(TableName, Procedure, ProcArgs, RemoteAddress, Owner) ->
   Args = [TableName, Procedure, ProcArgs, RemoteAddress, Owner],
