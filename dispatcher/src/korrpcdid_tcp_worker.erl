@@ -21,6 +21,8 @@
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 -export([code_change/3]).
 
+-export_type([job_id/0]).
+
 %%%---------------------------------------------------------------------------
 %%% types {{{
 

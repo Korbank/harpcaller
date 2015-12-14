@@ -37,6 +37,8 @@ init([] = _Args) ->
   Children = [
     {korrpc_sdb_sup, {korrpc_sdb_sup, start_link, []},
       permanent, 1000, worker, [korrpc_sdb_sup]},
+    {korrpcdid_caller_sup, {korrpcdid_caller_sup, start_link, []},
+      permanent, 1000, supervisor, [korrpcdid_caller_sup]},
     {korrpcdid_tcp_sup, {korrpcdid_tcp_sup, start_link, []},
       permanent, 1000, supervisor, [korrpcdid_tcp_sup]}
   ],

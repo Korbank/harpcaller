@@ -6,15 +6,18 @@ blockdiag {
   //span_width = 40;
 
   korrpcdid_sup -> korrpcdid_tcp_sup;
+  korrpcdid_sup -> korrpcdid_caller_sup;
   korrpcdid_sup -> korrpc_sdb_sup;
-  korrpc_sdb_sup -> korrpc_sdb;
   korrpcdid_tcp_sup -> korrpcdid_tcp_listener;
   korrpcdid_tcp_sup -> korrpcdid_tcp_worker_sup;
   korrpcdid_tcp_worker_sup -> korrpcdid_tcp_worker;
+  korrpc_sdb_sup -> korrpc_sdb;
+  korrpcdid_caller_sup -> korrpcdid_caller;
 
-  korrpc_sdb  [stacked];
   korrpcdid_tcp_listener  [stacked];
   korrpcdid_tcp_worker    [stacked];
+  korrpcdid_caller        [stacked];
+  korrpc_sdb              [stacked];
 }
 
 // vim:ft=dot
