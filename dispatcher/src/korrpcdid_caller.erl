@@ -1,10 +1,11 @@
 %%%----------------------------------------------------------------------------
-%%% @private
 %%% @doc
 %%%   Remote procedure calling process.
 %%%   Process running this module calls remote procedure, receives whatever it
 %%%   returns (both end result and streamed response), and records it in
 %%%   {@link korrpc_sdb}.
+%%%
+%%% @todo Stream followers
 %%% @end
 %%%----------------------------------------------------------------------------
 
@@ -24,11 +25,14 @@
 %%% type specification/documentation {{{
 
 -record(state, {
-  job_id,
-  stream_table
+  job_id       :: korrpcdid_tcp_worker:job_id(),
+  stream_table :: korrpc_sdb:table(),
+  call         :: korrpc:handle()
 }).
 
 -include("korrpcdid_caller.hrl").
+
+-define(RPC_READ_INTERVAL, 100).
 
 % }}}
 %%%---------------------------------------------------------------------------
@@ -41,10 +45,9 @@
 %% @doc Start caller process.
 
 start(Procedure, ProcArgs, Host, Port) ->
-  JobID = korrpc_uuid:format(korrpc_uuid:uuid()),
-  Args = [JobID, Procedure, ProcArgs, Host, Port],
-  case gen_server:start(?MODULE, Args, []) of
-    {ok, Pid} -> {ok, Pid, JobID};
+  {ok, Pid} = gen_server:start(?MODULE, [], []),
+  case gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Port}) of
+    {ok, JobID} -> {ok, Pid, JobID};
     {error, Reason} -> {error, Reason}
   end.
 
@@ -52,10 +55,9 @@ start(Procedure, ProcArgs, Host, Port) ->
 %% @doc Start caller process.
 
 start_link(Procedure, ProcArgs, Host, Port) ->
-  JobID = korrpc_uuid:format(korrpc_uuid:uuid()),
-  Args = [JobID, Procedure, ProcArgs, Host, Port],
-  case gen_server:start_link(?MODULE, Args, []) of
-    {ok, Pid} -> {ok, Pid, JobID};
+  {ok, Pid} = gen_server:start_link(?MODULE, [], []),
+  case gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Port}) of
+    {ok, JobID} -> {ok, Pid, JobID};
     {error, Reason} -> {error, Reason}
   end.
 
@@ -69,19 +71,20 @@ start_link(Procedure, ProcArgs, Host, Port) ->
 %% @private
 %% @doc Initialize event handler.
 
-init([JobID, Procedure, ProcArgs, Host, Port] = _Args) ->
-  % TODO: use `[Procedure, ProcArgs, Host, Port]' some other way
-  {ok, StreamTable} = korrpc_sdb:new(JobID, Procedure, ProcArgs, {Host, Port}),
+init([] = _Args) ->
+  JobID = korrpc_uuid:format(korrpc_uuid:uuid()),
   ets:insert(?ETS_REGISTRY_TABLE, {JobID, self()}),
   State = #state{
-    job_id = JobID,
-    stream_table = StreamTable
+    job_id = JobID
   },
   {ok, State}.
 
 %% @private
 %% @doc Clean up after event handler.
 
+terminate(_Arg, _State = #state{job_id = JobID, stream_table = undefined}) ->
+  ets:delete(?ETS_REGISTRY_TABLE, JobID),
+  ok;
 terminate(_Arg, _State = #state{job_id = JobID, stream_table = StreamTable}) ->
   ets:delete(?ETS_REGISTRY_TABLE, JobID),
   korrpc_sdb:close(StreamTable),
@@ -93,6 +96,27 @@ terminate(_Arg, _State = #state{job_id = JobID, stream_table = StreamTable}) ->
 
 %% @private
 %% @doc Handle {@link gen_server:call/2}.
+
+handle_call({start_call, Procedure, ProcArgs, Host, Port} = _Request, _From,
+            State = #state{job_id = JobID, call = undefined}) ->
+  case korrpc_sdb:new(JobID, Procedure, ProcArgs, {Host, Port}) of
+    {ok, StreamTable} ->
+      case korrpc:request(Procedure, ProcArgs, [{host, Host}, {port, Port}]) of
+        {ok, Handle} ->
+          io:fwrite("%% ~p request sent~n", [self()]),
+          NewState = State#state{
+            stream_table = StreamTable,
+            call = Handle
+          },
+          {reply, {ok, JobID}, NewState, 0};
+        {error, Reason} ->
+          StopReason = {call, Reason},
+          {stop, StopReason, {error, StopReason}, State}
+      end;
+    {error, Reason} ->
+      StopReason = {open, Reason},
+      {stop, StopReason, {error, StopReason}, State}
+  end;
 
 %% unknown calls
 handle_call(_Request, _From, State) ->
@@ -107,6 +131,29 @@ handle_cast(_Request, State) ->
 
 %% @private
 %% @doc Handle incoming messages.
+
+handle_info(timeout = _Message,
+            State = #state{call = Handle, stream_table = StreamTable}) ->
+  case korrpc:recv(Handle, ?RPC_READ_INTERVAL) of
+    timeout ->
+      {noreply, State, 0};
+    {packet, Packet} ->
+      io:fwrite("%% ~p got packet: ~1024p~n", [self(), Packet]),
+      ok = korrpc_sdb:insert(StreamTable, Packet),
+      {noreply, State, 0};
+    {result, Result} ->
+      io:fwrite("%% ~p return ~1024p~n", [self(), Result]),
+      ok = korrpc_sdb:set_result(StreamTable, {return, Result}),
+      {stop, normal, State};
+    {exception, Exception} ->
+      io:fwrite("%% ~p exception! ~1024p~n", [self(), Exception]),
+      ok = korrpc_sdb:set_result(StreamTable, {exception, Exception}),
+      {stop, normal, State};
+    {error, Reason} ->
+      io:fwrite("%% ~p error: ~1024p~n", [self(), Reason]),
+      ok = korrpc_sdb:set_result(StreamTable, {error, Reason}),
+      {stop, normal, State}
+  end;
 
 %% unknown messages
 handle_info(_Message, State) ->
