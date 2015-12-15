@@ -125,7 +125,7 @@ set_result(Handle, cancelled = Result) ->
 %%   `missing' is returned.
 
 -spec result(handle()) ->
-    {ok, korrpc:result()}
+    {return, korrpc:result()}
   | still_running
   | cancelled
   | missing
@@ -233,7 +233,7 @@ handle_call(get_result = _Request, _From, State = #state{finished = false}) ->
 handle_call(get_result = _Request, _From, State = #state{data = StreamTable}) ->
   Result = case ets:lookup(StreamTable, result) of
     [] -> missing;
-    [{result, {return, R}}]    -> {ok, R};
+    [{result, {return, R}}]    -> {return, R};
     [{result, {exception, E}}] -> {exception, E};
     [{result, {error, E}}]     -> {error, E};
     [{result, cancelled}] -> cancelled

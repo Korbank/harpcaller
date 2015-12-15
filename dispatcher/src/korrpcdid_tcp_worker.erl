@@ -137,7 +137,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
     {get_result, JobID, no_wait} -> % immediate
       put('$worker_function', get_result),
       case korrpcdid_caller:get_result(JobID) of
-        {ok, Result} ->
+        {return, Result} ->
           send_response(Socket, [{<<"result">>, Result}]);
         still_running ->
           send_response(Socket, [{<<"no_result">>, true}]);

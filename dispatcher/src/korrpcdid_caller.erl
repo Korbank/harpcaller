@@ -100,7 +100,7 @@ cancel(JobID) ->
 %% @doc Retrieve result of a job (non-blocking).
 
 -spec get_result(korrpcdid:job_id()) ->
-    {ok, korrpc:result()}
+    {return, korrpc:result()}
   | still_running
   | cancelled
   | missing
