@@ -148,6 +148,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Port} = _Request, _From,
           },
           {reply, {ok, JobID}, NewState, 0};
         {error, Reason} ->
+          korrpc_sdb:close(StreamTable),
           StopReason = {call, Reason},
           {stop, StopReason, {error, StopReason}, State}
       end;
