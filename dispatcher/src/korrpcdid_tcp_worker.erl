@@ -20,8 +20,6 @@
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 -export([code_change/3]).
 
--export_type([job_id/0]).
-
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
@@ -37,19 +35,17 @@
     Timeout :: timeout(),
     MaxExecTime :: timeout()}.
 
--type request_cancel() :: {cancel, job_id()}.
+-type request_cancel() :: {cancel, korrpcdid:job_id()}.
 
--type request_get_result() :: {get_result, job_id(), wait | no_wait}.
+-type request_get_result() :: {get_result, korrpcdid:job_id(), wait | no_wait}.
 
 -type request_follow_stream() ::
-    {follow_stream, job_id(), since, non_neg_integer()}
-  | {follow_stream, job_id(), recent, non_neg_integer()}.
+    {follow_stream, korrpcdid:job_id(), since, non_neg_integer()}
+  | {follow_stream, korrpcdid:job_id(), recent, non_neg_integer()}.
 
 -type request_read_stream() ::
-    {read_stream, job_id(), since, non_neg_integer()}
-  | {read_stream, job_id(), recent, non_neg_integer()}.
-
--type job_id() :: string().
+    {read_stream, korrpcdid:job_id(), since, non_neg_integer()}
+  | {read_stream, korrpcdid:job_id(), recent, non_neg_integer()}.
 
 %%% }}}
 %%%---------------------------------------------------------------------------

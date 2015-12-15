@@ -9,8 +9,9 @@
 -export([call/3]).
 -export([request/3, recv/1, recv/2, cancel/1]).
 
--export_type([procedure/0, argument/0, result/0, error_description/0]).
--export_type([stream_handle/0]).
+-export_type([procedure/0, argument/0]).
+-export_type([stream_record/0, result/0, error_description/0]).
+-export_type([handle/0]).
 
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
@@ -21,11 +22,13 @@
 
 -type result() :: korrpc_json:struct().
 
+-type stream_record() :: korrpc_json:struct().
+
 -type error_description() ::
     {Type :: binary(), Message :: binary()}
   | {Type :: binary(), Message :: binary(), Data :: korrpc_json:struct()}.
 
--opaque stream_handle() :: ssl:sslsocket().
+-opaque handle() :: ssl:sslsocket().
 
 % }}}
 %%%---------------------------------------------------------------------------
@@ -106,7 +109,7 @@ call(Procedure, Arguments, Options) when is_binary(Procedure) ->
 %% @see cancel/1
 
 -spec request(procedure(), [argument()], list()) ->
-  {ok, stream_handle()} | {error, term()}.
+  {ok, handle()} | {error, term()}.
 
 request(Procedure, Arguments, Options) when is_list(Procedure) ->
   request(list_to_binary(Procedure), Arguments, Options);
@@ -170,7 +173,7 @@ end.
 
 %% @equiv recv(Handle, infinity)
 
--spec recv(stream_handle()) ->
+-spec recv(handle()) ->
     {packet, korrpc_json:struct()}
   | {result, korrpc_json:struct()}
   | {exception, error_description()}
@@ -183,17 +186,17 @@ recv(Handle) ->
 %%   with {@link request/3}.
 %%
 %%   Consecutive calls to this function return {@type
-%%   {packet,korrpc_json:struct()@}} tuples, which denote streamed result. If
-%%   the call returns value of any other form, it marks the end of the stream
-%%   and `Handle' is closed.
+%%   {packet,stream_record()@}} tuples, which denote streamed result.
+%%   If the call returns value of any other form, it marks the end of the
+%%   stream and `Handle' is closed.
 %%
 %%   <ul>
-%%     <li>{@type {result,korrpc_json:struct()@}} is returned if the remote
-%%       procedure terminated successfully</li>
+%%     <li>{@type {result,result()@}} is returned if the remote procedure
+%%       terminated successfully</li>
 %%     <li>{@type {exception,error_description()@}} is returned if the remote
 %%       procedure raised an exception</li>
-%%     <li>{@type {error,term()@}} is returned in the case of a read error
-%%       (e.g. connection closed abruptly)</li>
+%%     <li>{@type {error,error_description()|term()@}} is returned in the case
+%%       of a read error (e.g. connection closed abruptly)</li>
 %%   </ul>
 %%
 %%   If `Timeout' was less than `infinity' and expires, call returns atom
@@ -202,7 +205,7 @@ recv(Handle) ->
 %% @see request/3
 %% @see cancel/1
 
--spec recv(stream_handle(), timeout()) ->
+-spec recv(handle(), timeout()) ->
     timeout
   | {packet, korrpc_json:struct()}
   | {result, korrpc_json:struct()}
@@ -235,7 +238,7 @@ recv(Handle, Timeout) ->
 %% @see request/3
 %% @see recv/1
 
--spec cancel(stream_handle()) ->
+-spec cancel(handle()) ->
   ok.
 
 cancel(Handle) ->

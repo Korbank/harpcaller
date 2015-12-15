@@ -28,8 +28,8 @@
 %%% type specification/documentation {{{
 
 -record(state, {
-  job_id       :: korrpcdid_tcp_worker:job_id(),
-  stream_table :: korrpc_sdb:table(),
+  job_id       :: korrpcdid:job_id(),
+  stream_table :: korrpc_sdb:handle(),
   call         :: korrpc:handle()
 }).
 
@@ -48,7 +48,7 @@
 
 -spec call(korrpc:procedure(), [korrpc:argument()],
            inet:hostname() | inet:ip_address() | binary()) ->
-  {ok, pid(), korrpcdid_tcp_worker:job_id()} | {error, term()}.
+  {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 call(Procedure, Args, Host) ->
   call(Procedure, Args, Host, 1638).
@@ -57,7 +57,7 @@ call(Procedure, Args, Host) ->
 
 -spec call(korrpc:procedure(), [korrpc:argument()],
            inet:hostname() | inet:ip_address() | binary(), inet:port_number()) ->
-  {ok, pid(), korrpcdid_tcp_worker:job_id()} | {error, term()}.
+  {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 call(Procedure, Args, Host, Port) when is_binary(Host) ->
   call(Procedure, Args, binary_to_list(Host), Port);
@@ -66,7 +66,7 @@ call(Procedure, Args, Host, Port) ->
 
 %% @doc Locate the process that carries out specified job ID.
 
--spec locate(korrpcdid_tcp_worker:job_id()) ->
+-spec locate(korrpcdid:job_id()) ->
   {ok, pid()} | none.
 
 locate(JobID) when is_list(JobID) ->
@@ -110,7 +110,7 @@ start_link(Procedure, ProcArgs, Host, Port) ->
 %% @doc Initialize event handler.
 
 init([] = _Args) ->
-  JobID = korrpc_uuid:format(korrpc_uuid:uuid()),
+  JobID = korrpcdid:generate_job_id(),
   ets:insert(?ETS_REGISTRY_TABLE, {JobID, self()}),
   State = #state{
     job_id = JobID

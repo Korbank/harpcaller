@@ -29,7 +29,7 @@
 
 -spec spawn_caller(korrpc:procedure(), [korrpc:argument()],
                    inet:hostname() | inet:ip_address(), inet:port_number()) ->
-  {ok, pid(), korrpcdid_tcp_worker:job_id()} | {error, term()}.
+  {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 spawn_caller(Procedure, ProcArgs, Host, Port) ->
   supervisor:start_child(?MODULE, [Procedure, ProcArgs, Host, Port]).

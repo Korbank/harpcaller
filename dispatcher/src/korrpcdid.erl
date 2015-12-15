@@ -8,7 +8,16 @@
 
 %% public interface
 -export([start/0]).
+-export([generate_job_id/0]).
 
+-export_type([job_id/0]).
+
+%%%---------------------------------------------------------------------------
+%%% type specification/documentation {{{
+
+-type job_id() :: string().
+
+%%% }}}
 %%%---------------------------------------------------------------------------
 %%% public interface
 %%%---------------------------------------------------------------------------
@@ -20,6 +29,18 @@
 
 start() ->
   start_rec(korrpcdid).
+
+%% @doc Generate a random job ID.
+
+-spec generate_job_id() ->
+  job_id().
+
+generate_job_id() ->
+  korrpc_uuid:format(korrpc_uuid:uuid()).
+
+%%%---------------------------------------------------------------------------
+%%% helpers
+%%%---------------------------------------------------------------------------
 
 %% @doc Start an Erlang application, recursively.
 

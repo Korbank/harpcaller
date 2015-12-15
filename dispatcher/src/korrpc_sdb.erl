@@ -36,7 +36,7 @@
   owner :: {pid(), reference()}
 }).
 
--opaque handle() :: pid().
+-type handle() :: pid().
 %% Result table handle.
 
 -type table_name() :: string().
@@ -88,7 +88,7 @@ close(Handle) ->
 
 %% @doc Insert one record from stream from RPC call.
 
--spec insert(handle(), korrpc_json:struct()) ->
+-spec insert(handle(), korrpc:stream_record()) ->
   ok.
 
 insert(Handle, Record) ->
@@ -97,7 +97,7 @@ insert(Handle, Record) ->
 %% @doc Set result from RPC call.
 %%   It can be later retrieved by calling {@link result/1}.
 
--spec set_result(handle(), {return, korrpc_json:struct()}
+-spec set_result(handle(), {return, korrpc:result()}
                  | {exception, korrpc:error_description()}
                  | {error, korrpc:error_description() | term()}
                  | cancelled) ->
@@ -125,7 +125,7 @@ set_result(Handle, cancelled = Result) ->
 %%   `missing' is returned.
 
 -spec result(handle()) ->
-    {ok, korrpc_json:struct()}
+    {ok, korrpc:result()}
   | still_running
   | cancelled
   | missing
@@ -142,7 +142,7 @@ result(Handle) ->
 %%   the job produces them, of course).
 
 -spec stream(handle(), non_neg_integer()) ->
-  {ok, korrpc_json:struct()} | still_running | end_of_stream.
+  {ok, korrpc:stream_record()} | still_running | end_of_stream.
 
 stream(Handle, Seq) when is_integer(Seq), Seq >= 0 ->
   gen_server:call(Handle, {get_stream, Seq}).
