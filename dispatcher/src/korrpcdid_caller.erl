@@ -13,6 +13,9 @@
 
 -behaviour(gen_server).
 
+%% public interface
+-export([call/3, call/4, locate/1]).
+
 %% supervision tree API
 -export([start/4, start_link/4]).
 
@@ -36,6 +39,41 @@
 
 % }}}
 %%%---------------------------------------------------------------------------
+
+%%%---------------------------------------------------------------------------
+%%% public interface
+%%%---------------------------------------------------------------------------
+
+%% @doc Spawn a (supervised) caller process to call remote procedure.
+
+-spec call(korrpc:procedure(), [korrpc:argument()],
+           inet:hostname() | inet:ip_address() | binary()) ->
+  {ok, pid(), korrpcdid_tcp_worker:job_id()} | {error, term()}.
+
+call(Procedure, Args, Host) ->
+  call(Procedure, Args, Host, 1638).
+
+%% @doc Spawn a (supervised) caller process to call remote procedure.
+
+-spec call(korrpc:procedure(), [korrpc:argument()],
+           inet:hostname() | inet:ip_address() | binary(), inet:port_number()) ->
+  {ok, pid(), korrpcdid_tcp_worker:job_id()} | {error, term()}.
+
+call(Procedure, Args, Host, Port) when is_binary(Host) ->
+  call(Procedure, Args, binary_to_list(Host), Port);
+call(Procedure, Args, Host, Port) ->
+  korrpcdid_caller_sup:spawn_caller(Procedure, Args, Host, Port).
+
+%% @doc Locate the process that carries out specified job ID.
+
+-spec locate(korrpcdid_tcp_worker:job_id()) ->
+  {ok, pid()} | none.
+
+locate(JobID) when is_list(JobID) ->
+  case ets:lookup(?ETS_REGISTRY_TABLE, JobID) of
+    [{JobID, Pid}] -> {ok, Pid};
+    [] -> none
+  end.
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API

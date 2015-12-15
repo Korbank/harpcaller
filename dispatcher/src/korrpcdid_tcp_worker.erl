@@ -117,10 +117,16 @@ handle_cast(_Request, State) ->
 
 handle_info(timeout = _Message, State = #state{socket = Socket}) ->
   case read_request(Socket, ?TCP_READ_INTERVAL) of
-    {call, _Proc, _Args, _Host, _Timeout, _MaxExecTime} -> % long running
+    {call, Proc, Args, Host, _Timeout, _MaxExecTime} -> % long running
       put('$worker_function', call),
-      % TODO: gen_server:enter_loop(korrpcdid_tcp_worker_call)
-      {noreply, State, 0};
+      % TODO: use `Timeout' and `MaxExecTime'
+      % TODO: allow non-default port to be used
+      {ok, _Pid, JobID} = korrpcdid_caller:call(Proc, Args, Host),
+      send_response(Socket, [
+        {<<"korrpcdid">>, 1},
+        {<<"job_id">>, list_to_binary(JobID)}
+      ]),
+      {stop, normal, State};
     {cancel, _JobID} -> % immediate
       put('$worker_function', cancel),
       % TODO: find appropriate call worker, send it cancellation
@@ -254,6 +260,16 @@ decode_request(Line) ->
     [{<<"read_stream">>, JobID}, {<<"since">>, Since}] ->
       {read_stream, binary_to_list(JobID), since, Since}
   end.
+
+%% @doc Encode a structure and send it as a response to client.
+
+-spec send_response(gen_tcp:socket(), korrpc_json:jhash()) ->
+  ok.
+
+send_response(Socket, Response) ->
+  {ok, Line} = korrpc_json:encode(Response),
+  ok = gen_tcp:send(Socket, [Line, $\n]),
+  ok.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
