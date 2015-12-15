@@ -15,6 +15,8 @@
 
 %% public interface
 -export([call/3, call/4, locate/1]).
+-export([cancel/1, get_result/1]).
+%% TODO: follow_stream(), read_stream()
 
 %% supervision tree API
 -export([start/4, start_link/4]).
@@ -56,7 +58,8 @@ call(Procedure, Args, Host) ->
 %% @doc Spawn a (supervised) caller process to call remote procedure.
 
 -spec call(korrpc:procedure(), [korrpc:argument()],
-           inet:hostname() | inet:ip_address() | binary(), inet:port_number()) ->
+           inet:hostname() | inet:ip_address() | binary(),
+           inet:port_number()) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 call(Procedure, Args, Host, Port) when is_binary(Host) ->
@@ -73,6 +76,42 @@ locate(JobID) when is_list(JobID) ->
   case ets:lookup(?ETS_REGISTRY_TABLE, JobID) of
     [{JobID, Pid}] -> {ok, Pid};
     [] -> none
+  end.
+
+%% @doc Send a request to caller process responsible for a job.
+
+-spec request(korrpcdid:job_id(), term()) ->
+  term() | undefined.
+
+request(JobID, Request) when is_list(JobID) ->
+  case ets:lookup(?ETS_REGISTRY_TABLE, JobID) of
+    [{JobID, Pid}] -> gen_server:call(Pid, Request);
+    [] -> undefined
+  end.
+
+%% @doc Cancel remote call job.
+
+-spec cancel(korrpcdid:job_id()) ->
+  ok | undefined.
+
+cancel(JobID) ->
+  request(JobID, cancel).
+
+%% @doc Retrieve result of a job (non-blocking).
+
+-spec get_result(korrpcdid:job_id()) ->
+    {ok, korrpc:result()}
+  | still_running
+  | cancelled
+  | missing
+  | {exception, korrpc:error_description()}
+  | {error, korrpc:error_description() | term()}
+  | undefined.
+
+get_result(JobID) ->
+  case request(JobID, get_sdb) of
+    {ok, StreamTable} -> korrpc_sdb:result(StreamTable);
+    undefined -> undefined
   end.
 
 %%%---------------------------------------------------------------------------
@@ -156,6 +195,15 @@ handle_call({start_call, Procedure, ProcArgs, Host, Port} = _Request, _From,
       StopReason = {open, Reason},
       {stop, StopReason, {error, StopReason}, State}
   end;
+
+handle_call(get_sdb = _Request, _From,
+            State = #state{stream_table = StreamTable}) ->
+  {reply, {ok, StreamTable}, State, 0};
+
+handle_call(cancel = _Request, _From,
+            State = #state{stream_table = StreamTable}) ->
+  korrpc_sdb:set_result(StreamTable, cancelled),
+  {stop, normal, ok, State};
 
 %% unknown calls
 handle_call(_Request, _From, State) ->
