@@ -130,47 +130,15 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
         undefined -> send_response(Socket, [{<<"cancelled">>, false}])
       end,
       {stop, normal, State};
-    {get_result, _JobID, wait} -> % long running
+    {get_result, JobID, Mode} -> % long running or immediate, depending on mode
       put('$worker_function', get_result),
-      % TODO: gen_server:enter_loop(korrpcdid_tcp_worker_call)
-      {noreply, State, 0};
-    {get_result, JobID, no_wait} -> % immediate
-      put('$worker_function', get_result),
-      case korrpcdid_caller:get_result(JobID) of
-        {return, Result} ->
-          send_response(Socket, [{<<"result">>, Result}]);
-        still_running ->
-          send_response(Socket, [{<<"no_result">>, true}]);
-        cancelled ->
-          send_response(Socket, [{<<"cancelled">>, true}]);
-        missing ->
-          'TODO';
-        {exception, {Type, Message}} ->
-          send_response(Socket, [
-            {<<"exception">>, [{<<"type">>, Type}, {<<"message">>, Message}]}
-          ]);
-        {exception, {Type, Message, Data}} ->
-          send_response(Socket, [
-            {<<"exception">>, [{<<"type">>, Type}, {<<"message">>, Message},
-                                {<<"data">>, Data}]}
-          ]);
-        {error, {Type, Message}} when is_binary(Type), is_binary(Message) ->
-          send_response(Socket, [
-            {<<"error">>, [{<<"type">>, Type}, {<<"message">>, Message}]}
-          ]);
-        {error, {Type, Message, Data}} when is_binary(Type), is_binary(Message) ->
-          send_response(Socket, [
-            {<<"error">>, [{<<"type">>, Type}, {<<"message">>, Message},
-                                {<<"data">>, Data}]}
-          ]);
-        {error, _Reason} ->
-          'TODO';
-        undefined ->
-          % no such job
-          % TODO: return an appropriate message
-          undefined
+      Wait = case Mode of
+        wait -> true;
+        no_wait -> false
       end,
-      {stop, normal, State};
+      NewState = korrpcdid_tcp_return_result:state(Socket, JobID, Wait),
+      % this does not return to this code
+      gen_server:enter_loop(korrpcdid_tcp_return_result, [], NewState, 0);
     {follow_stream, _JobID, _Mode, _ModeArg} -> % long running
       put('$worker_function', follow_stream),
       % TODO: gen_server:enter_loop(korrpcdid_tcp_worker_call)

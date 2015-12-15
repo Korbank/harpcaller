@@ -4,8 +4,6 @@
 %%%   Process running this module calls remote procedure, receives whatever it
 %%%   returns (both end result and streamed response), and records it in
 %%%   {@link korrpc_sdb}.
-%%%
-%%% @todo Stream followers
 %%% @end
 %%%----------------------------------------------------------------------------
 
@@ -15,8 +13,7 @@
 
 %% public interface
 -export([call/3, call/4, locate/1]).
--export([cancel/1, get_result/1]).
-%% TODO: follow_stream(), read_stream()
+-export([cancel/1, get_result/1, follow_stream/1]).
 
 %% supervision tree API
 -export([start/4, start_link/4]).
@@ -32,7 +29,8 @@
 -record(state, {
   job_id       :: korrpcdid:job_id(),
   stream_table :: korrpc_sdb:handle(),
-  call         :: korrpc:handle()
+  call         :: korrpc:handle(),
+  followers    :: ets:tab()
 }).
 
 -include("korrpcdid_caller.hrl").
@@ -103,6 +101,8 @@ cancel(JobID) ->
   request(JobID, cancel).
 
 %% @doc Retrieve result of a job (non-blocking).
+%%
+%% @todo Open {@link korrpc_sdb} if no process under `JobID' was present.
 
 -spec get_result(korrpcdid:job_id()) ->
     {return, korrpc:result()}
@@ -118,6 +118,19 @@ get_result(JobID) ->
     {ok, StreamTable} -> korrpc_sdb:result(StreamTable);
     undefined -> undefined
   end.
+
+%% @doc Follow stream of records returned by the job.
+%%
+%%   Caller will receive a sequence of {@type {record, korrpcdid:job_id(),
+%%   korrpc:stream_record()@}} messages, ended with {@type {terminated,
+%%   korrpcdid:job_id(), cancelled | Result@}}, where `Result' has the same
+%%   form and meaning as returned value of {@link korrpc:recv/1}.
+
+-spec follow_stream(korrpcdid:job_id()) ->
+  ok | undefined.
+
+follow_stream(JobID) ->
+  request(JobID, {follow, self()}).
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
@@ -156,20 +169,24 @@ start_link(Procedure, ProcArgs, Host, Port) ->
 init([] = _Args) ->
   JobID = korrpcdid:generate_job_id(),
   ets:insert(?ETS_REGISTRY_TABLE, {JobID, self()}),
+  Followers = ets:new(followers, [set]),
   State = #state{
-    job_id = JobID
+    job_id = JobID,
+    followers = Followers
   },
   {ok, State}.
 
 %% @private
 %% @doc Clean up after event handler.
 
-terminate(_Arg, _State = #state{job_id = JobID, stream_table = undefined}) ->
+terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
+                                stream_table = StreamTable}) ->
   ets:delete(?ETS_REGISTRY_TABLE, JobID),
-  ok;
-terminate(_Arg, _State = #state{job_id = JobID, stream_table = StreamTable}) ->
-  ets:delete(?ETS_REGISTRY_TABLE, JobID),
-  korrpc_sdb:close(StreamTable),
+  ets:delete(Followers),
+  case StreamTable of
+    undefined -> ok;
+    _ -> korrpc_sdb:close(StreamTable)
+  end,
   ok.
 
 %% }}}
@@ -185,7 +202,6 @@ handle_call({start_call, Procedure, ProcArgs, Host, Port} = _Request, _From,
     {ok, StreamTable} ->
       case korrpc:request(Procedure, ProcArgs, [{host, Host}, {port, Port}]) of
         {ok, Handle} ->
-          io:fwrite("%% ~p request sent~n", [self()]),
           NewState = State#state{
             stream_table = StreamTable,
             call = Handle
@@ -201,12 +217,19 @@ handle_call({start_call, Procedure, ProcArgs, Host, Port} = _Request, _From,
       {stop, StopReason, {error, StopReason}, State}
   end;
 
+handle_call({follow, Pid} = _Request, _From,
+            State = #state{followers = Followers}) ->
+  Ref = erlang:monitor(process, Pid),
+  ets:insert(Followers, {Pid, Ref}),
+  {reply, ok, State, 0};
+
 handle_call(get_sdb = _Request, _From,
             State = #state{stream_table = StreamTable}) ->
   {reply, {ok, StreamTable}, State, 0};
 
 handle_call(cancel = _Request, _From,
-            State = #state{stream_table = StreamTable}) ->
+            State = #state{stream_table = StreamTable, job_id = JobID}) ->
+  notify_followers(State, {terminated, JobID, cancelled}),
   korrpc_sdb:set_result(StreamTable, cancelled),
   {stop, normal, ok, State};
 
@@ -224,25 +247,31 @@ handle_cast(_Request, State) ->
 %% @private
 %% @doc Handle incoming messages.
 
+handle_info({'DOWN', Ref, process, Pid, _Reason} = _Message,
+            State = #state{followers = Followers}) ->
+  ets:delete_object(Followers, {Pid, Ref}),
+  {noreply, State, 0};
+
 handle_info(timeout = _Message,
-            State = #state{call = Handle, stream_table = StreamTable}) ->
+            State = #state{call = Handle, stream_table = StreamTable,
+                           job_id = JobID}) ->
   case korrpc:recv(Handle, ?RPC_READ_INTERVAL) of
     timeout ->
       {noreply, State, 0};
     {packet, Packet} ->
-      io:fwrite("%% ~p got packet: ~1024p~n", [self(), Packet]),
+      notify_followers(State, {record, JobID, Packet}),
       ok = korrpc_sdb:insert(StreamTable, Packet),
       {noreply, State, 0};
     {result, Result} ->
-      io:fwrite("%% ~p return ~1024p~n", [self(), Result]),
+      notify_followers(State, {terminated, JobID, {return, Result}}),
       ok = korrpc_sdb:set_result(StreamTable, {return, Result}),
       {stop, normal, State};
     {exception, Exception} ->
-      io:fwrite("%% ~p exception! ~1024p~n", [self(), Exception]),
+      notify_followers(State, {terminated, JobID, {exception, Exception}}),
       ok = korrpc_sdb:set_result(StreamTable, {exception, Exception}),
       {stop, normal, State};
     {error, Reason} ->
-      io:fwrite("%% ~p error: ~1024p~n", [self(), Reason]),
+      notify_followers(State, {terminated, JobID, {error, Reason}}),
       ok = korrpc_sdb:set_result(StreamTable, {error, Reason}),
       {stop, normal, State}
   end;
@@ -263,6 +292,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% }}}
 %%----------------------------------------------------------
+
+%%%---------------------------------------------------------------------------
+
+notify_followers(_State = #state{followers = Followers}, Message) ->
+  ets:foldl(fun send_message/2, Message, Followers),
+  ok.
+
+send_message({Pid, _Ref} = _Entry, Message) ->
+  Pid ! Message,
+  % `Message' is actually an accumulator, but it works well this way
+  Message.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
