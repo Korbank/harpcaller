@@ -85,7 +85,12 @@ locate(JobID) when is_list(JobID) ->
 
 request(JobID, Request) when is_list(JobID) ->
   case ets:lookup(?ETS_REGISTRY_TABLE, JobID) of
-    [{JobID, Pid}] -> gen_server:call(Pid, Request);
+    [{JobID, Pid}] ->
+      try
+        gen_server:call(Pid, Request)
+      catch
+        exit:{noproc,_} -> undefined
+      end;
     [] -> undefined
   end.
 
