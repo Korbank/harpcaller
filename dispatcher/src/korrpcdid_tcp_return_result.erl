@@ -167,7 +167,7 @@ format_result(undefined = _Result) ->
 
 %% @doc Encode a structure and send it as a response to client.
 
--spec send_response(gen_tcp:socket(), korrpc_json:jhash()) ->
+-spec send_response(#state{}, korrpc_json:jhash()) ->
   ok.
 
 send_response(_State = #state{client = Socket}, Response) ->
