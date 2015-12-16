@@ -139,14 +139,18 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       NewState = korrpcdid_tcp_return_result:state(Socket, JobID, Wait),
       % this does not return to this code
       gen_server:enter_loop(korrpcdid_tcp_return_result, [], NewState, 0);
-    {follow_stream, _JobID, _Mode, _ModeArg} -> % long running
+    {follow_stream, JobID, Mode, ModeArg} -> % long running
+      % `Mode :: recent | since'
       put('$worker_function', follow_stream),
-      % TODO: gen_server:enter_loop(korrpcdid_tcp_worker_call)
-      {noreply, State, 0};
-    {read_stream, _JobID, _Mode, _ModeArg} -> % immediate
-      % TODO: read from korrpc_sdb
+      NewState = korrpcdid_tcp_return_stream:state(Socket, JobID, follow, {Mode, ModeArg}),
+      % this does not return to this code
+      gen_server:enter_loop(korrpcdid_tcp_return_stream, [], NewState, 0);
+    {read_stream, JobID, Mode, ModeArg} -> % immediate
+      % `Mode :: recent | since'
       put('$worker_function', read_stream),
-      {noreply, State, 0};
+      NewState = korrpcdid_tcp_return_stream:state(Socket, JobID, read, {Mode, ModeArg}),
+      % this does not return to this code
+      gen_server:enter_loop(korrpcdid_tcp_return_stream, [], NewState, 0);
     timeout ->
       % yield for next system message if any awaits our attention
       {noreply, State, 0};
