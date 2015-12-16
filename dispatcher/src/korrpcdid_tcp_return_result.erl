@@ -87,7 +87,7 @@ handle_cast(_Request, State) ->
 %% @private
 %% @doc Handle incoming messages.
 
-handle_info({record, JobID, _Record} = _Message,
+handle_info({record, JobID, _Id, _Record} = _Message,
             State = #state{job_id = JobID}) ->
   % streamed response -- ignore this message
   {noreply, State};

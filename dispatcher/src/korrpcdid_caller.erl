@@ -30,7 +30,8 @@
   job_id       :: korrpcdid:job_id(),
   stream_table :: korrpc_sdb:handle(),
   call         :: korrpc:handle(),
-  followers    :: ets:tab()
+  followers    :: ets:tab(),
+  count = 0    :: non_neg_integer()
 }).
 
 -include("korrpcdid_caller.hrl").
@@ -122,9 +123,10 @@ get_result(JobID) ->
 %% @doc Follow stream of records returned by the job.
 %%
 %%   Caller will receive a sequence of {@type {record, korrpcdid:job_id(),
-%%   korrpc:stream_record()@}} messages, ended with {@type {terminated,
-%%   korrpcdid:job_id(), cancelled | Result@}}, where `Result' has the same
-%%   form and meaning as returned value of {@link korrpc:recv/1}.
+%%   Id :: non_neg_integer(), korrpc:stream_record()@}} messages, ended with
+%%   {@type {terminated, korrpcdid:job_id(), cancelled | Result@}}, where
+%%   `Result' has the same form and meaning as returned value of {@link
+%%   korrpc:recv/1}.
 
 -spec follow_stream(korrpcdid:job_id()) ->
   ok | undefined.
@@ -254,14 +256,15 @@ handle_info({'DOWN', Ref, process, Pid, _Reason} = _Message,
 
 handle_info(timeout = _Message,
             State = #state{call = Handle, stream_table = StreamTable,
-                           job_id = JobID}) ->
+                           job_id = JobID, count = Count}) ->
   case korrpc:recv(Handle, ?RPC_READ_INTERVAL) of
     timeout ->
       {noreply, State, 0};
     {packet, Packet} ->
-      notify_followers(State, {record, JobID, Packet}),
+      notify_followers(State, {record, JobID, Count, Packet}),
       ok = korrpc_sdb:insert(StreamTable, Packet),
-      {noreply, State, 0};
+      NewState = State#state{count = Count + 1},
+      {noreply, NewState, 0};
     {result, Result} ->
       notify_followers(State, {terminated, JobID, {return, Result}}),
       ok = korrpc_sdb:set_result(StreamTable, {return, Result}),
