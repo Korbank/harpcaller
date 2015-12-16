@@ -191,7 +191,8 @@ read_request(Socket, Timeout) ->
         decode_request(Line)
       catch
         error:{badmatch,_}    -> {error, bad_protocol};
-        error:{case_clause,_} -> {error, bad_protocol}
+        error:{case_clause,_} -> {error, bad_protocol};
+        error:badarg          -> {error, bad_protocol}
       end;
     {error, timeout} ->
       timeout;
@@ -201,8 +202,8 @@ read_request(Socket, Timeout) ->
 
 %% @doc Decode string into a request.
 %%
-%%   Function dies (`badmatch' or `case_clause') when the request is
-%%   malformed.
+%%   Function dies (`badmatch', `case_clause', or `badarg') when the request
+%%   is malformed.
 
 -spec decode_request(binary()) ->
     request_call()
