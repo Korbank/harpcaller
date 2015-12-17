@@ -189,14 +189,12 @@ read_stream(State = #state{job_id = JobID, since = undefined, recent = R}) ->
     _ ->
       Id = 0
   end,
-  % TODO: uncomment this later, once the handle is not shared process anymore
-  %korrpc_sdb:close(DBH),
+  korrpc_sdb:close(DBH),
   {ok, Id};
 read_stream(State = #state{job_id = JobID, since = S, recent = undefined}) ->
   {ok, DBH} = korrpc_sdb:load(JobID), % FIXME: this may fail
   Id = read_stream(State, DBH, S),
-  % TODO: uncomment this later, once the handle is not shared process anymore
-  %korrpc_sdb:close(DBH),
+  korrpc_sdb:close(DBH),
   {ok, Id}.
 
 %% @doc Read streamed messages from {@link korrpc_sdb} and send them to TCP

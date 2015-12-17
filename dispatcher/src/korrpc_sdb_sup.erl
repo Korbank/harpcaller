@@ -27,7 +27,7 @@
 %%%---------------------------------------------------------------------------
 
 -spec spawn_child(term()) ->
-  {ok, pid()} | {error, term()}.
+  {ok, pid()} | {ok, undefined} | {error, term()}.
 
 spawn_child(Args) ->
   supervisor:start_child(?MODULE, Args).

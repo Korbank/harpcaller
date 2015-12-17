@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% supervision tree API
--export([start/5, start_link/5]).
+-export([start/6, start/3, start_link/6, start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, terminate/2]).
@@ -30,10 +30,10 @@
 
 -record(state, {
   table_name,
-  data :: ets:tab(), % in future: dets:tab_name()
+  data :: dets:tab_name(),
   stream_counter = 0,
   finished :: boolean(),
-  owner :: {pid(), reference()}
+  holders :: ets:tab()
 }).
 
 -type handle() :: pid().
@@ -59,9 +59,12 @@
   {ok, handle()} | {error, term()}.
 
 new(TableName, Procedure, ProcArgs, RemoteAddress) ->
-  Args = [TableName, Procedure, ProcArgs, RemoteAddress, self()],
-  {ok, Pid} = korrpc_sdb_sup:spawn_child(Args),
-  {ok, Pid}.
+  Args = [TableName, self(), write, Procedure, ProcArgs, RemoteAddress],
+  case korrpc_sdb_sup:spawn_child(Args) of
+    {ok, Pid} when is_pid(Pid) -> {ok, Pid};
+    {ok, undefined} -> {error, eexist};
+    {error, Reason} -> {error, Reason}
+  end.
 
 %% @doc Load an existing table.
 
@@ -69,9 +72,13 @@ new(TableName, Procedure, ProcArgs, RemoteAddress) ->
   {ok, handle()} | {error, term()}.
 
 load(TableName) ->
+  % FIXME: this is a race condition between lookup and call/spawn
   case ets:lookup(?ETS_REGISTRY_TABLE, TableName) of
-    [{TableName, Pid}] -> {ok, Pid};
-    [] -> {error, enoent}
+    [{TableName, Pid}] ->
+      ok = gen_server:call(Pid, {load, self()}),
+      {ok, Pid};
+    [] ->
+      korrpc_sdb_sup:spawn_child([TableName, self(), read])
   end.
 
 %% @doc Close table handle.
@@ -80,7 +87,9 @@ load(TableName) ->
   ok.
 
 close(Handle) ->
-  gen_server:call(Handle, close).
+  % FIXME: this single call makes it impossible to keep several handles to the
+  % same table in a single process (though it should not be a problem ATM)
+  gen_server:call(Handle, {close, self()}).
 
 %% }}}
 %%----------------------------------------------------------
@@ -163,17 +172,31 @@ stream_size(Handle) ->
 %%%---------------------------------------------------------------------------
 
 %% @private
-%% @doc Start stream DB process.
+%% @doc Start R/W stream DB process.
 
-start(TableName, Procedure, ProcArgs, RemoteAddress, Owner) ->
-  Args = [TableName, Procedure, ProcArgs, RemoteAddress, Owner],
+start(TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress) ->
+  Args = [TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress],
+  gen_server:start(?MODULE, Args, []).
+
+%% @private
+%% @doc Start R/O stream DB process.
+
+start(TableName, Pid, AccessMode) ->
+  Args = [TableName, Pid, AccessMode],
   gen_server:start(?MODULE, Args, []).
 
 %% @private
 %% @doc Start stream DB process.
 
-start_link(TableName, Procedure, ProcArgs, RemoteAddress, Owner) ->
-  Args = [TableName, Procedure, ProcArgs, RemoteAddress, Owner],
+start_link(TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress) ->
+  Args = [TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress],
+  gen_server:start_link(?MODULE, Args, []).
+
+%% @private
+%% @doc Start R/O stream DB process.
+
+start_link(TableName, Pid, AccessMode) ->
+  Args = [TableName, Pid, AccessMode],
   gen_server:start_link(?MODULE, Args, []).
 
 %%%---------------------------------------------------------------------------
@@ -186,25 +209,79 @@ start_link(TableName, Procedure, ProcArgs, RemoteAddress, Owner) ->
 %% @private
 %% @doc Initialize event handler.
 
-init([TableName, _Procedure, _ProcArgs, _RemoteAddress, Owner] = _Args) ->
-  link(Owner),
-  MonRef = monitor(process, Owner),
-  StreamTable = ets:new(stream_data, [ordered_set]),
-  ets:insert(StreamTable, {stream_count, 0}),
-  State = #state{
-    table_name = TableName,
-    data = StreamTable,
-    finished = false,
-    owner = {Owner, MonRef}
-  },
-  ets:insert(?ETS_REGISTRY_TABLE, {TableName, self()}),
-  {ok, State}.
+init([TableName, Pid, read = _AccessMode] = _Args) ->
+  case ets:insert_new(?ETS_REGISTRY_TABLE, {TableName, self()}) of
+    true ->
+      % TODO: check `TableName' for valid name format
+      {ok, Directory} = application:get_env(stream_directory),
+      Filename = filename:join(Directory, TableName),
+      case dets:open_file(Filename, [{type, set}, {access, read}]) of
+        {ok, StreamTable} ->
+          HoldersTable = ets:new(holders, [bag]),
+          MonRef = monitor(process, Pid),
+          ets:insert(HoldersTable, {Pid, MonRef}),
+          [{stream_count, Count}] = dets:lookup(StreamTable, stream_count),
+          State = #state{
+            table_name = TableName,
+            stream_counter = Count,
+            data = StreamTable,
+            holders = HoldersTable,
+            finished = true
+          },
+          {ok, State};
+        {error, {file_error, _, Reason}} ->
+          ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
+          {stop, Reason};
+        {error, Reason} ->
+          ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
+          {stop, Reason}
+      end;
+    false ->
+      ignore
+  end;
+init([TableName, Pid, write = _AccessMode,
+       Procedure, ProcArgs, RemoteAddress] = _Args) ->
+  case ets:insert_new(?ETS_REGISTRY_TABLE, {TableName, self()}) of
+    true ->
+      % TODO: check `TableName' for valid name format
+      {ok, Directory} = application:get_env(stream_directory),
+      Filename = filename:join(Directory, TableName),
+      case dets:open_file(Filename, [{type, set}, {access, read_write}]) of
+        {ok, StreamTable} ->
+          HoldersTable = ets:new(holders, [bag]),
+          MonRef = monitor(process, Pid),
+          ets:insert(HoldersTable, {Pid, MonRef}),
+          dets:insert(StreamTable, [
+            {procedure, {Procedure, ProcArgs}},
+            {host, RemoteAddress},
+            {stream_count, 0}
+          ]),
+          State = #state{
+            table_name = TableName,
+            stream_counter = 0,
+            data = StreamTable,
+            holders = HoldersTable,
+            finished = false
+          },
+          {ok, State};
+        {error, {file_error, _, Reason}} ->
+          ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
+          {stop, Reason};
+        {error, Reason} ->
+          ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
+          {stop, Reason}
+      end;
+    false ->
+      ignore
+  end.
 
 %% @private
 %% @doc Clean up after event handler.
 
-terminate(_Arg, _State = #state{data = StreamTable, table_name = TableName}) ->
-  ets:delete(StreamTable),
+terminate(_Arg, _State = #state{data = StreamTable, holders = HoldersTable,
+                                table_name = TableName}) ->
+  dets:close(StreamTable),
+  ets:delete(HoldersTable), % should be empty by now
   ets:delete(?ETS_REGISTRY_TABLE, TableName),
   ok.
 
@@ -222,8 +299,8 @@ handle_call({add_stream, Record} = _Request, _From,
     #state{finished = true} ->
       NewState = State; % ignore if finished
     #state{finished = false} ->
-      ets:insert(StreamTable, {N, Record}),
-      ets:update_counter(StreamTable, stream_count, 1),
+      dets:insert(StreamTable, {N, Record}),
+      dets:update_counter(StreamTable, stream_count, 1),
       NewState = State#state{stream_counter = N + 1}
   end,
   {reply, ok, NewState};
@@ -233,15 +310,20 @@ handle_call({set_result, Result} = _Request, _From,
             State = #state{data = StreamTable}) ->
   % Result :: {return, term()} | cancelled |
   %            {exception, term()} | {error, term()}
-  ets:insert(StreamTable, {result, Result}),
-  NewState = State#state{finished = true},
+  case State of
+    #state{finished = true} ->
+      NewState = State; % ignore if finished
+    #state{finished = false} ->
+      dets:insert(StreamTable, {result, Result}),
+      NewState = State#state{finished = true}
+  end,
   {reply, ok, NewState};
 
 %% get result returned by RPC call, if any
 handle_call(get_result = _Request, _From, State = #state{finished = false}) ->
   {reply, still_running, State};
 handle_call(get_result = _Request, _From, State = #state{data = StreamTable}) ->
-  Result = case ets:lookup(StreamTable, result) of
+  Result = case dets:lookup(StreamTable, result) of
     [] -> missing;
     [{result, {return, R}}]    -> {return, R};
     [{result, {exception, E}}] -> {exception, E};
@@ -259,20 +341,33 @@ handle_call({get_stream, Seq} = _Request, _From,
     #state{finished = false} when Seq >= N ->
       still_running;
     _ when Seq < N ->
-      [{Seq, Record}] = ets:lookup(StreamTable, Seq),
+      [{Seq, Record}] = dets:lookup(StreamTable, Seq),
       {ok, Record}
   end,
   {reply, Result, State};
 
 %% get the number of collected records so far
 handle_call(get_stream_size = _Request, _From,
-            State = #state{data = StreamTable}) ->
-  [{stream_count, Count}] = ets:lookup(StreamTable, stream_count),
+            State = #state{stream_counter = Count}) ->
   {reply, Count, State};
 
+%% open a handle to an already opened database
+handle_call({load, Pid} = _Request, _From,
+            State = #state{holders = HoldersTable}) ->
+  MonRef = monitor(process, Pid),
+  ets:insert(HoldersTable, {Pid, MonRef}),
+  {reply, ok, State};
+
 %% close the handle
-handle_call(close = _Request, _From, State) ->
-  {stop, normal, ok, State};
+handle_call({close, Pid} = _Request, _From,
+            State = #state{holders = HoldersTable}) ->
+  [demonitor(Ref, [flush]) || {_, Ref} <- ets:lookup(HoldersTable, Pid)],
+  ets:delete(HoldersTable, Pid),
+  % TODO: if it was the R/W holder, change our state to `finished=true'
+  case ets:info(HoldersTable, size) of
+    0 -> {stop, normal, ok, State};
+    _ -> {reply, ok, State}
+  end;
 
 %% unknown calls
 handle_call(_Request, _From, State) ->
@@ -290,8 +385,13 @@ handle_cast(_Request, State) ->
 
 %% owner shut down
 handle_info({'DOWN', MonRef, process, Pid, _} = _Message,
-            State = #state{owner = {Pid, MonRef}}) ->
-  {stop, normal, State};
+            State = #state{holders = HoldersTable}) ->
+  ets:delete_object(HoldersTable, {Pid, MonRef}),
+  % TODO: if it was the R/W holder, change our state to `finished=true'
+  case ets:info(HoldersTable, size) of
+    0 -> {stop, normal, State};
+    _ -> {noreply, State}
+  end;
 
 %% unknown messages
 handle_info(_Message, State) ->
