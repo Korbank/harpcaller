@@ -137,7 +137,7 @@ code_change(_OldVsn, State, _Extra) ->
 format_result({return, Value} = _Result) ->
   [{<<"result">>, Value}];
 format_result(still_running = _Result) ->
-  [{<<"no_result">>, true}];
+  [{<<"no_result">>, true}]; % XXX: different from korrpcdid_tcp_return_stream
 format_result(cancelled = _Result) ->
   [{<<"cancelled">>, true}];
 format_result(missing = _Result) ->
@@ -168,12 +168,11 @@ format_result(undefined = _Result) ->
 %% @doc Encode a structure and send it as a response to client.
 
 -spec send_response(#state{}, korrpc_json:jhash()) ->
-  ok.
+  ok | {error, term()}.
 
 send_response(_State = #state{client = Socket}, Response) ->
   {ok, Line} = korrpc_json:encode(Response),
-  ok = gen_tcp:send(Socket, [Line, $\n]),
-  ok.
+  gen_tcp:send(Socket, [Line, $\n]).
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

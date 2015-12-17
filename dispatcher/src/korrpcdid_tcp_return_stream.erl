@@ -102,8 +102,11 @@ handle_cast(_Request, State) ->
 
 handle_info({record, JobID, Id, Record} = _Message,
             State = #state{job_id = JobID}) ->
-  send_response(State, [{<<"packet">>, Id}, {<<"data">>, Record}]),
-  {noreply, State};
+  case send_response(State, [{<<"packet">>, Id}, {<<"data">>, Record}]) of
+    ok -> {noreply, State};
+    {error, closed} -> {stop, normal, State};
+    {error, Reason} -> {stop, Reason, State}
+  end;
 
 handle_info({terminated, JobID, Result} = _Message,
             State = #state{job_id = JobID}) ->
@@ -235,12 +238,11 @@ format_result(undefined = _Result) ->
 %% @doc Encode a structure and send it as a response to client.
 
 -spec send_response(#state{}, korrpc_json:jhash()) ->
-  ok.
+  ok | {error, term()}.
 
 send_response(_State = #state{client = Socket}, Response) ->
   {ok, Line} = korrpc_json:encode(Response),
-  ok = gen_tcp:send(Socket, [Line, $\n]),
-  ok.
+  gen_tcp:send(Socket, [Line, $\n]).
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
