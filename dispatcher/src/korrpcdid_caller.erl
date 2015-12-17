@@ -102,8 +102,6 @@ cancel(JobID) ->
   request(JobID, cancel).
 
 %% @doc Retrieve result of a job (non-blocking).
-%%
-%% @todo Open {@link korrpc_sdb} if no process under `JobID' was present.
 
 -spec get_result(korrpcdid:job_id()) ->
     {return, korrpc:result()}
@@ -116,8 +114,19 @@ cancel(JobID) ->
 
 get_result(JobID) ->
   case request(JobID, get_sdb) of
-    {ok, StreamTable} -> korrpc_sdb:result(StreamTable);
-    undefined -> undefined
+    {ok, StreamTable} ->
+      korrpc_sdb:result(StreamTable);
+    undefined ->
+      case korrpc_sdb:load(JobID) of
+        {ok, DBH} ->
+          Result = korrpc_sdb:result(DBH),
+          korrpc_sdb:close(DBH),
+          Result;
+        {error, enoent} ->
+          undefined;
+        {error, Reason} ->
+          {error, Reason}
+      end
   end.
 
 %% @doc Follow stream of records returned by the job.
