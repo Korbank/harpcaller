@@ -21,7 +21,7 @@
 %% public interface
 -export([new/4, load/1, close/1]).
 -export([insert/2, set_result/2]).
--export([result/1, stream/2]).
+-export([result/1, stream/2, stream_size/1]).
 
 -export_type([handle/0]).
 
@@ -147,6 +147,14 @@ result(Handle) ->
 stream(Handle, Seq) when is_integer(Seq), Seq >= 0 ->
   gen_server:call(Handle, {get_stream, Seq}).
 
+%% @doc Get current size of stream (number of collected records so far).
+
+-spec stream_size(handle()) ->
+  non_neg_integer().
+
+stream_size(Handle) ->
+  gen_server:call(Handle, get_stream_size).
+
 %% }}}
 %%----------------------------------------------------------
 
@@ -182,6 +190,7 @@ init([TableName, _Procedure, _ProcArgs, _RemoteAddress, Owner] = _Args) ->
   link(Owner),
   MonRef = monitor(process, Owner),
   StreamTable = ets:new(stream_data, [ordered_set]),
+  ets:insert(StreamTable, {stream_count, 0}),
   State = #state{
     table_name = TableName,
     data = StreamTable,
@@ -214,6 +223,7 @@ handle_call({add_stream, Record} = _Request, _From,
       NewState = State; % ignore if finished
     #state{finished = false} ->
       ets:insert(StreamTable, {N, Record}),
+      ets:update_counter(StreamTable, stream_count, 1),
       NewState = State#state{stream_counter = N + 1}
   end,
   {reply, ok, NewState};
@@ -253,6 +263,12 @@ handle_call({get_stream, Seq} = _Request, _From,
       {ok, Record}
   end,
   {reply, Result, State};
+
+%% get the number of collected records so far
+handle_call(get_stream_size = _Request, _From,
+            State = #state{data = StreamTable}) ->
+  [{stream_count, Count}] = ets:lookup(StreamTable, stream_count),
+  {reply, Count, State};
 
 %% close the handle
 handle_call(close = _Request, _From, State) ->

@@ -116,6 +116,10 @@ handle_info({terminated, JobID, Result} = _Message,
 
 handle_info(timeout = _Message, State = #state{job_id = JobID}) ->
   case State of
+    #state{mode = follow, recent = 0} ->
+      % special case when there's no need to read the history of stream
+      korrpcdid_caller:follow_stream(JobID),
+      {noreply, State};
     #state{mode = follow} ->
       korrpcdid_caller:follow_stream(JobID),
       {ok, NextId} = read_stream(State),
@@ -174,8 +178,20 @@ flush_stream(JobID, Until) ->
 -spec read_stream(#state{}) ->
   {ok, NextId :: non_neg_integer()}.
 
-read_stream(_State = #state{job_id = _JobID, since = undefined, recent = _R}) ->
-  'TODO';
+read_stream(State = #state{job_id = JobID, since = undefined, recent = R}) ->
+  {ok, DBH} = korrpc_sdb:load(JobID), % FIXME: this may fail
+  case (korrpc_sdb:stream_size(DBH) - R) of
+    LastId when LastId >= 0 ->
+      % FIXME: read_stream() may send more records than requested if something
+      % comes between reading stream size and reading last message (race
+      % condition thingy); this is not an important bug, though
+      Id = read_stream(State, DBH, LastId);
+    _ ->
+      Id = 0
+  end,
+  % TODO: uncomment this later, once the handle is not shared process anymore
+  %korrpc_sdb:close(DBH),
+  {ok, Id};
 read_stream(State = #state{job_id = JobID, since = S, recent = undefined}) ->
   {ok, DBH} = korrpc_sdb:load(JobID), % FIXME: this may fail
   Id = read_stream(State, DBH, S),
