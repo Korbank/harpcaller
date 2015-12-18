@@ -115,20 +115,27 @@ handle_info({terminated, JobID, Result} = _Message,
   {stop, normal, State};
 
 handle_info(timeout = _Message, State = #state{job_id = JobID}) ->
+  % FIXME: korrpcdid_caller:follow_stream() calls die on jobs that are not
+  % running at the moment
   case State of
     #state{mode = follow, recent = 0} ->
       % special case when there's no need to read the history of stream
-      korrpcdid_caller:follow_stream(JobID),
+      ok = korrpcdid_caller:follow_stream(JobID),
       {noreply, State};
     #state{mode = follow} ->
-      korrpcdid_caller:follow_stream(JobID),
-      {ok, NextId} = read_stream(State),
-      % TODO: if this operation specified an ID in the future, skip those as
-      % well (probably in `handle_info({record, ...})')
-      flush_stream(JobID, NextId),
-      {noreply, State};
+      ok = korrpcdid_caller:follow_stream(JobID),
+      case read_stream(State) of
+        {ok, NextId} ->
+          % TODO: if this operation specified an ID in the future, skip those
+          % as well (probably in `handle_info({record, ...})')
+          flush_stream(JobID, NextId),
+          {noreply, State};
+        {error, Reason} ->
+          send_response(State, format_result({error, Reason})),
+          {stop, Reason, State}
+      end;
     #state{mode = read} ->
-      read_stream(State),
+      read_stream(State), % don't care if successful or not
       Result = korrpcdid_caller:get_result(JobID),
       send_response(State, format_result(Result)),
       {stop, normal, State}
@@ -170,32 +177,39 @@ flush_stream(JobID, Until) ->
 %% @doc Read streamed messages from {@link korrpc_sdb} and send them to TCP
 %%   client.
 %%
-%%   Function returns record ID to skip until, suitable for use with {@link
-%%   flush_stream/2}.
+%%   Function returns `ok'-tuple with record ID to skip until, suitable for
+%%   use with {@link flush_stream/2}.
 %%
 %% @see read_stream/3
 
 -spec read_stream(#state{}) ->
-  {ok, NextId :: non_neg_integer()}.
+  {ok, NextId :: non_neg_integer()} | {error, term()}.
 
-read_stream(State = #state{job_id = JobID, since = undefined, recent = R}) ->
-  {ok, DBH} = korrpc_sdb:load(JobID), % FIXME: this may fail
-  case (korrpc_sdb:stream_size(DBH) - R) of
-    LastId when LastId >= 0 ->
-      % FIXME: read_stream() may send more records than requested if something
-      % comes between reading stream size and reading last message (race
-      % condition thingy); this is not an important bug, though
-      Id = read_stream(State, DBH, LastId);
-    _ ->
-      Id = 0
-  end,
-  korrpc_sdb:close(DBH),
-  {ok, Id};
-read_stream(State = #state{job_id = JobID, since = S, recent = undefined}) ->
-  {ok, DBH} = korrpc_sdb:load(JobID), % FIXME: this may fail
-  Id = read_stream(State, DBH, S),
-  korrpc_sdb:close(DBH),
-  {ok, Id}.
+read_stream(State = #state{job_id = JobID}) ->
+  case korrpc_sdb:load(JobID) of
+    {ok, DBH} ->
+      Result = case State of
+        #state{since = undefined, recent = R} when is_integer(R) ->
+          case (korrpc_sdb:stream_size(DBH) - R) of
+            LastId when LastId >= 0 ->
+              % FIXME: read_stream() may send more records than requested if
+              % something comes between reading stream size and reading last
+              % message (race condition thingy); this is not an important bug,
+              % though
+              Id = read_stream(State, DBH, LastId),
+              {ok, Id};
+            _ ->
+              {ok, 0}
+          end;
+        #state{recent = undefined, since = S} when is_integer(S) ->
+          Id = read_stream(State, DBH, S),
+          {ok, Id}
+      end,
+      korrpc_sdb:close(DBH),
+      Result;
+    {error, Reason} ->
+      {error, Reason}
+  end.
 
 %% @doc Read streamed messages from {@link korrpc_sdb} and send them to TCP
 %%   client.

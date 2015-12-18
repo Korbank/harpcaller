@@ -152,20 +152,20 @@ follow_stream(JobID) ->
 
 start(Procedure, ProcArgs, Host, Port) ->
   {ok, Pid} = gen_server:start(?MODULE, [], []),
-  case gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Port}) of
-    {ok, JobID} -> {ok, Pid, JobID};
-    {error, Reason} -> {error, Reason}
-  end.
+  % make the process crash on severe operational error (SDB opening error)
+  {ok, JobID} =
+    gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Port}),
+  {ok, Pid, JobID}.
 
 %% @private
 %% @doc Start caller process.
 
 start_link(Procedure, ProcArgs, Host, Port) ->
   {ok, Pid} = gen_server:start_link(?MODULE, [], []),
-  case gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Port}) of
-    {ok, JobID} -> {ok, Pid, JobID};
-    {error, Reason} -> {error, Reason}
-  end.
+  % make the process crash on severe operational error (SDB opening error)
+  {ok, JobID} =
+    gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Port}),
+  {ok, Pid, JobID}.
 
 %%%---------------------------------------------------------------------------
 %%% gen_server callbacks
@@ -221,10 +221,12 @@ handle_call({start_call, Procedure, ProcArgs, Host, Port} = _Request, _From,
         {error, Reason} ->
           korrpc_sdb:set_result(StreamTable, {error, Reason}),
           NewState = State#state{stream_table = StreamTable},
-          StopReason = {call, Reason},
-          {stop, StopReason, {error, StopReason}, NewState}
+          % request itself failed, but the job was carried successfully; tell
+          % the parent that that part got done
+          {stop, {call, Reason}, {ok, JobID}, NewState}
       end;
     {error, Reason} ->
+      % operational and (mostly) unexpected error; signal crashing
       StopReason = {open, Reason},
       {stop, StopReason, {error, StopReason}, State}
   end;
