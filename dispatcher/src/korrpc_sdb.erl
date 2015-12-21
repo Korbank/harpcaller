@@ -1,8 +1,6 @@
 %%%----------------------------------------------------------------------------
 %%% @doc
 %%%   Stream result database reading/writing.
-%%%
-%%% @todo Load table from disk
 %%% @end
 %%%----------------------------------------------------------------------------
 
@@ -250,7 +248,10 @@ init([TableName, Pid, write = _AccessMode,
         {ok, StreamTable} ->
           HoldersTable = ets:new(holders, [bag]),
           MonRef = monitor(process, Pid),
-          ets:insert(HoldersTable, {Pid, MonRef}),
+          ets:insert(HoldersTable, [
+            {Pid, MonRef},
+            {rw, Pid}
+          ]),
           dets:insert(StreamTable, [
             {procedure, {Procedure, ProcArgs}},
             {host, RemoteAddress},
@@ -363,10 +364,16 @@ handle_call({close, Pid} = _Request, _From,
             State = #state{holders = HoldersTable}) ->
   [demonitor(Ref, [flush]) || {_, Ref} <- ets:lookup(HoldersTable, Pid)],
   ets:delete(HoldersTable, Pid),
-  % TODO: if it was the R/W holder, change our state to `finished=true'
+  case ets:lookup(HoldersTable, rw) of
+    [{rw, Pid}] ->
+      ets:delete(HoldersTable, rw),
+      NewState = State#state{finished = true};
+    _ ->
+      NewState = State
+  end,
   case ets:info(HoldersTable, size) of
-    0 -> {stop, normal, ok, State};
-    _ -> {reply, ok, State}
+    0 -> {stop, normal, ok, NewState};
+    _ -> {reply, ok, NewState}
   end;
 
 %% unknown calls
@@ -387,10 +394,16 @@ handle_cast(_Request, State) ->
 handle_info({'DOWN', MonRef, process, Pid, _} = _Message,
             State = #state{holders = HoldersTable}) ->
   ets:delete_object(HoldersTable, {Pid, MonRef}),
-  % TODO: if it was the R/W holder, change our state to `finished=true'
+  case ets:lookup(HoldersTable, rw) of
+    [{rw, Pid}] ->
+      ets:delete(HoldersTable, rw),
+      NewState = State#state{finished = true};
+    _ ->
+      NewState = State
+  end,
   case ets:info(HoldersTable, size) of
-    0 -> {stop, normal, State};
-    _ -> {noreply, State}
+    0 -> {stop, normal, NewState};
+    _ -> {noreply, NewState}
   end;
 
 %% unknown messages
