@@ -11,6 +11,8 @@
   {mod, { korrpcdid_app, []}}, % callback module
   {env, [
     %{stream_directory, ""},
+    {default_timeout, 600},
+    {max_exec_time, 600},
     {listen, [
       {any, 1639}
     ]}

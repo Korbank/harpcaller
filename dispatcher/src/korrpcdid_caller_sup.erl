@@ -26,13 +26,14 @@
 %%%---------------------------------------------------------------------------
 
 %% @doc Spawn a new worker process.
+%%   `Options' are passed to {@link korrpcdid_caller} (back) without change.
 
 -spec spawn_caller(korrpc:procedure(), [korrpc:argument()],
-                   inet:hostname() | inet:ip_address(), inet:port_number()) ->
+                   inet:hostname() | inet:ip_address(), [term()]) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
-spawn_caller(Procedure, ProcArgs, Host, Port) ->
-  supervisor:start_child(?MODULE, [Procedure, ProcArgs, Host, Port]).
+spawn_caller(Procedure, ProcArgs, Host, Options) ->
+  supervisor:start_child(?MODULE, [Procedure, ProcArgs, Host, Options]).
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API

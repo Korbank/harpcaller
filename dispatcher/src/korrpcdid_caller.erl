@@ -38,6 +38,12 @@
 
 -define(RPC_READ_INTERVAL, 100).
 
+-type call_option() ::
+    {port, inet:port_number()}
+  %| {credentials, term()}
+  | {timeout, timeout()}
+  | {max_exec_time, timeout()}.
+
 % }}}
 %%%---------------------------------------------------------------------------
 
@@ -52,19 +58,18 @@
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 call(Procedure, Args, Host) ->
-  call(Procedure, Args, Host, 1638).
+  call(Procedure, Args, Host, [{port, 1638}]).
 
 %% @doc Spawn a (supervised) caller process to call remote procedure.
 
 -spec call(korrpc:procedure(), [korrpc:argument()],
-           inet:hostname() | inet:ip_address() | binary(),
-           inet:port_number()) ->
+           inet:hostname() | inet:ip_address() | binary(), [call_option()]) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
-call(Procedure, Args, Host, Port) when is_binary(Host) ->
-  call(Procedure, Args, binary_to_list(Host), Port);
-call(Procedure, Args, Host, Port) ->
-  korrpcdid_caller_sup:spawn_caller(Procedure, Args, Host, Port).
+call(Procedure, Args, Host, Options) when is_binary(Host) ->
+  call(Procedure, Args, binary_to_list(Host), Options);
+call(Procedure, Args, Host, Options) when is_list(Options) ->
+  korrpcdid_caller_sup:spawn_caller(Procedure, Args, Host, Options).
 
 %% @doc Locate the process that carries out specified job ID.
 
@@ -150,21 +155,21 @@ follow_stream(JobID) ->
 %% @private
 %% @doc Start caller process.
 
-start(Procedure, ProcArgs, Host, Port) ->
+start(Procedure, ProcArgs, Host, Options) ->
   {ok, Pid} = gen_server:start(?MODULE, [], []),
   % make the process crash on severe operational error (SDB opening error)
   {ok, JobID} =
-    gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Port}),
+    gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Options}),
   {ok, Pid, JobID}.
 
 %% @private
 %% @doc Start caller process.
 
-start_link(Procedure, ProcArgs, Host, Port) ->
+start_link(Procedure, ProcArgs, Host, Options) ->
   {ok, Pid} = gen_server:start_link(?MODULE, [], []),
   % make the process crash on severe operational error (SDB opening error)
   {ok, JobID} =
-    gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Port}),
+    gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Options}),
   {ok, Pid, JobID}.
 
 %%%---------------------------------------------------------------------------
@@ -207,8 +212,9 @@ terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
 %% @private
 %% @doc Handle {@link gen_server:call/2}.
 
-handle_call({start_call, Procedure, ProcArgs, Host, Port} = _Request, _From,
+handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
             State = #state{job_id = JobID, call = undefined}) ->
+  {Port, _Timeout, _MaxExecTime} = decode_options(Options),
   case korrpc_sdb:new(JobID, Procedure, ProcArgs, {Host, Port}) of
     {ok, StreamTable} ->
       case korrpc:request(Procedure, ProcArgs, [{host, Host}, {port, Port}]) of
@@ -309,6 +315,29 @@ code_change(_OldVsn, State, _Extra) ->
 %%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
+
+-spec decode_options([call_option()]) ->
+  {Port :: inet:port_number(), Timeout :: timeout(), MaxExecTime :: timeout()}.
+
+decode_options(Options) ->
+  Port = proplists:get_value(port, Options, 1638),
+  T = proplists:get_value(timeout, Options),
+  {ok, TA} = application:get_env(default_timeout),
+  E = proplists:get_value(max_exec_time, Options),
+  {ok, EA} = application:get_env(max_exec_time),
+  Timeout = case {T, TA} of
+    {undefined, _}      -> TA;
+    {infinity, _}       -> T; % effect limited by `MaxExecTime' anyway
+    {_, _} when T  > TA -> TA;
+    {_, _} when T =< TA -> T
+  end,
+  MaxExecTime = case {E, EA} of
+    {undefined, _}      -> EA;
+    {infinity, _}       -> EA;
+    {_, _} when E  > EA -> EA;
+    {_, _} when E =< EA -> E
+  end,
+  {Port, Timeout, MaxExecTime}.
 
 notify_followers(_State = #state{followers = Followers}, Message) ->
   ets:foldl(fun send_message/2, Message, Followers),
