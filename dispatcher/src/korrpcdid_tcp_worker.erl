@@ -113,11 +113,20 @@ handle_cast(_Request, State) ->
 
 handle_info(timeout = _Message, State = #state{socket = Socket}) ->
   case read_request(Socket, ?TCP_READ_INTERVAL) of
-    {call, Proc, Args, Host, _Timeout, _MaxExecTime} -> % long running
+    {call, Proc, Args, Host, Timeout, MaxExecTime} -> % long running
       put('$worker_function', call),
-      % TODO: use `Timeout' and `MaxExecTime'
+      Options = case {Timeout, MaxExecTime} of
+        {undefined, undefined} ->
+          [];
+        {_, undefined} when is_integer(Timeout) ->
+          [{timeout, Timeout}];
+        {undefined, _} when is_integer(MaxExecTime) ->
+          [{max_exec_time, MaxExecTime}];
+        {_, _} when is_integer(Timeout), is_integer(MaxExecTime) ->
+          [{timeout, Timeout}, {max_exec_time, MaxExecTime}]
+      end,
       % TODO: allow non-default port to be used
-      {ok, _Pid, JobID} = korrpcdid_caller:call(Proc, Args, Host),
+      {ok, _Pid, JobID} = korrpcdid_caller:call(Proc, Args, Host, Options),
       send_response(Socket, [
         {<<"korrpcdid">>, 1},
         {<<"job_id">>, list_to_binary(JobID)}
