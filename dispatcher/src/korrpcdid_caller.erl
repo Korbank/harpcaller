@@ -26,12 +26,19 @@
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
+%% I should probably keep `max_exec_time' and `timeout' as microseconds to
+%% avoid multiplication and division, but `timeout()' type is usually
+%% milliseconds (e.g. in `receive .. end'), so let's leave it this way
 -record(state, {
   job_id       :: korrpcdid:job_id(),
   stream_table :: korrpc_sdb:handle(),
   call         :: korrpc:handle(),
   followers    :: ets:tab(),
-  count = 0    :: non_neg_integer()
+  count = 0    :: non_neg_integer(),
+  start_time   :: erlang:timestamp(),
+  last_read    :: erlang:timestamp(),
+  max_exec_time :: timeout(), % ms
+  timeout      :: timeout()   % ms
 }).
 
 -include("korrpcdid_caller.hrl").
@@ -214,14 +221,19 @@ terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
 
 handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
             State = #state{job_id = JobID, call = undefined}) ->
-  {Port, _Timeout, _MaxExecTime} = decode_options(Options),
+  {Port, Timeout, MaxExecTime} = decode_options(Options),
   case korrpc_sdb:new(JobID, Procedure, ProcArgs, {Host, Port}) of
     {ok, StreamTable} ->
       case korrpc:request(Procedure, ProcArgs, [{host, Host}, {port, Port}]) of
         {ok, Handle} ->
+          Now = now(),
           NewState = State#state{
             stream_table = StreamTable,
-            call = Handle
+            call = Handle,
+            start_time = Now,
+            last_read = Now,
+            max_exec_time = MaxExecTime,
+            timeout = Timeout
           },
           {reply, {ok, JobID}, NewState, 0};
         {error, Reason} ->
@@ -277,11 +289,30 @@ handle_info(timeout = _Message,
                            job_id = JobID, count = Count}) ->
   case korrpc:recv(Handle, ?RPC_READ_INTERVAL) of
     timeout ->
-      {noreply, State, 0};
+      % NOTE: we need a monotonic clock, so `erlang:now()' is the way to go
+      Now = erlang:now(),
+      % timer:now_diff() returns microseconds; make it milliseconds
+      ReadTime = timer:now_diff(Now, State#state.last_read)  div 1000,
+      RunTime  = timer:now_diff(Now, State#state.start_time) div 1000,
+      case State of
+        % `ReadTime < infinity' for all integers
+        #state{timeout = Timeout} when ReadTime >= Timeout ->
+          TimeoutDesc = {<<"timeout">>, <<"reading result timed out">>},
+          notify_followers(State, {terminated, JobID, {error, TimeoutDesc}}),
+          ok = korrpc_sdb:set_result(StreamTable, {error, TimeoutDesc}),
+          {stop, normal, State};
+        #state{max_exec_time = MaxExecTime} when RunTime >= MaxExecTime ->
+          TimeoutDesc = {<<"timeout">>, <<"maximum execution time exceeded">>},
+          notify_followers(State, {terminated, JobID, {error, TimeoutDesc}}),
+          ok = korrpc_sdb:set_result(StreamTable, {error, TimeoutDesc}),
+          {stop, normal, State};
+        _ ->
+          {noreply, State, 0}
+      end;
     {packet, Packet} ->
       notify_followers(State, {record, JobID, Count, Packet}),
       ok = korrpc_sdb:insert(StreamTable, Packet),
-      NewState = State#state{count = Count + 1},
+      NewState = State#state{count = Count + 1, last_read = now()},
       {noreply, NewState, 0};
     {result, Result} ->
       notify_followers(State, {terminated, JobID, {return, Result}}),
@@ -326,16 +357,16 @@ decode_options(Options) ->
   E = proplists:get_value(max_exec_time, Options),
   {ok, EA} = application:get_env(max_exec_time),
   Timeout = case {T, TA} of
-    {undefined, _}      -> TA;
+    {undefined, _}      -> TA * 1000;
     {infinity, _}       -> T; % effect limited by `MaxExecTime' anyway
-    {_, _} when T  > TA -> TA;
-    {_, _} when T =< TA -> T
+    {_, _} when T  > TA -> TA * 1000;
+    {_, _} when T =< TA -> T  * 1000
   end,
   MaxExecTime = case {E, EA} of
-    {undefined, _}      -> EA;
-    {infinity, _}       -> EA;
-    {_, _} when E  > EA -> EA;
-    {_, _} when E =< EA -> E
+    {undefined, _}      -> EA * 1000;
+    {infinity, _}       -> EA * 1000;
+    {_, _} when E  > EA -> EA * 1000;
+    {_, _} when E =< EA -> E  * 1000
   end,
   {Port, Timeout, MaxExecTime}.
 
