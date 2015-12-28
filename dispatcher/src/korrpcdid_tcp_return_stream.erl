@@ -115,21 +115,32 @@ handle_info({terminated, JobID, Result} = _Message,
   {stop, normal, State};
 
 handle_info(timeout = _Message, State = #state{job_id = JobID}) ->
-  % FIXME: korrpcdid_caller:follow_stream() calls die on jobs that are not
-  % running at the moment
   case State of
     #state{mode = follow, recent = 0} ->
       % special case when there's no need to read the history of stream
-      ok = korrpcdid_caller:follow_stream(JobID),
-      {noreply, State};
+      case korrpcdid_caller:follow_stream(JobID) of
+        ok ->
+          {noreply, State};
+        undefined ->
+          Result = korrpcdid_caller:get_result(JobID),
+          send_response(State, format_result(Result)),
+          {stop, normal, State}
+      end;
     #state{mode = follow} ->
-      ok = korrpcdid_caller:follow_stream(JobID),
+      Follow = korrpcdid_caller:follow_stream(JobID),
       case read_stream(State) of
         {ok, NextId} ->
-          % TODO: if this operation specified an ID in the future, skip those
-          % as well (probably in `handle_info({record, ...})')
-          flush_stream(JobID, NextId),
-          {noreply, State};
+          case Follow of
+            ok ->
+              % TODO: if this operation specified an ID in the future, skip
+              % those as well (probably in `handle_info({record, ...})')
+              flush_stream(JobID, NextId),
+              {noreply, State};
+            undefined ->
+              Result = korrpcdid_caller:get_result(JobID),
+              send_response(State, format_result(Result)),
+              {stop, normal, State}
+          end;
         {error, Reason} ->
           send_response(State, format_result({error, Reason})),
           {stop, Reason, State}
