@@ -32,8 +32,8 @@
     Procedure :: binary(),
     Arguments :: korrpc_json:jarray() | korrpc_json:jhash(),
     Host :: binary(),
-    Timeout :: timeout(),
-    MaxExecTime :: timeout()}.
+    Timeout :: timeout() | undefined,
+    MaxExecTime :: timeout() | undefined}.
 
 -type request_cancel() :: {cancel, korrpcdid:job_id()}.
 
