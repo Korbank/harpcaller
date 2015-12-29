@@ -232,6 +232,7 @@ init([TableName, Pid | AccessModeAndArgs] = _Args) ->
               dets:insert(StreamTable, [
                 {procedure, {Procedure, ProcArgs}},
                 {host, RemoteAddress},
+                {job_start, timestamp()},
                 {stream_count, 0}
               ]),
               State = #state{
@@ -304,6 +305,7 @@ handle_call({set_result, Result} = _Request, _From,
       NewState = State; % ignore if finished
     #state{finished = false} ->
       dets:insert(StreamTable, {result, Result}),
+      dets:insert(StreamTable, {job_end, timestamp()}),
       NewState = State#state{finished = true}
   end,
   {reply, ok, NewState};
@@ -410,6 +412,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% }}}
 %%----------------------------------------------------------
+
+%%%---------------------------------------------------------------------------
+
+%% @doc Read OS timestamp as unix epoch time.
+
+-spec timestamp() ->
+  integer().
+
+timestamp() ->
+  {MS, S, _US} = os:timestamp(),
+  MS * 1000 * 1000 + S.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
