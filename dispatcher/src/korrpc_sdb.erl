@@ -207,64 +207,52 @@ start_link(TableName, Pid, AccessMode) ->
 %% @private
 %% @doc Initialize event handler.
 
-init([TableName, Pid, read = _AccessMode] = _Args) ->
+init([TableName, Pid | AccessModeAndArgs] = _Args) ->
   case ets:insert_new(?ETS_REGISTRY_TABLE, {TableName, self()}) of
     true ->
       % TODO: check `TableName' for valid name format
       {ok, Directory} = application:get_env(stream_directory),
       Filename = filename:join(Directory, TableName),
-      case dets:open_file(Filename, [{type, set}, {access, read}]) of
+      % prepare monitoring table
+      HoldersTable = ets:new(holders, [bag]),
+      MonRef = monitor(process, Pid),
+      ets:insert(HoldersTable, {Pid, MonRef}),
+      % access mode for DETS table (R/O or R/W)
+      Access = case AccessModeAndArgs of
+        [read] -> read;
+        [write, _, _, _] -> read_write
+      end,
+      case dets:open_file(Filename, [{type, set}, {access, Access}]) of
         {ok, StreamTable} ->
-          HoldersTable = ets:new(holders, [bag]),
-          MonRef = monitor(process, Pid),
-          ets:insert(HoldersTable, {Pid, MonRef}),
-          [{stream_count, Count}] = dets:lookup(StreamTable, stream_count),
-          State = #state{
-            table_name = TableName,
-            stream_counter = Count,
-            data = StreamTable,
-            holders = HoldersTable,
-            finished = true
-          },
-          {ok, State};
-        {error, {file_error, _, Reason}} ->
-          ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
-          {stop, Reason};
-        {error, Reason} ->
-          ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
-          {stop, Reason}
-      end;
-    false ->
-      ignore
-  end;
-init([TableName, Pid, write = _AccessMode,
-       Procedure, ProcArgs, RemoteAddress] = _Args) ->
-  case ets:insert_new(?ETS_REGISTRY_TABLE, {TableName, self()}) of
-    true ->
-      % TODO: check `TableName' for valid name format
-      {ok, Directory} = application:get_env(stream_directory),
-      Filename = filename:join(Directory, TableName),
-      case dets:open_file(Filename, [{type, set}, {access, read_write}]) of
-        {ok, StreamTable} ->
-          HoldersTable = ets:new(holders, [bag]),
-          MonRef = monitor(process, Pid),
-          ets:insert(HoldersTable, [
-            {Pid, MonRef},
-            {rw, Pid}
-          ]),
-          dets:insert(StreamTable, [
-            {procedure, {Procedure, ProcArgs}},
-            {host, RemoteAddress},
-            {stream_count, 0}
-          ]),
-          State = #state{
-            table_name = TableName,
-            stream_counter = 0,
-            data = StreamTable,
-            holders = HoldersTable,
-            finished = false
-          },
-          {ok, State};
+          case AccessModeAndArgs of
+            [write, Procedure, ProcArgs, RemoteAddress] ->
+              % additional marker when to (pretend to) close the table
+              ets:insert(HoldersTable, {rw, Pid}),
+              % job metadata
+              dets:insert(StreamTable, [
+                {procedure, {Procedure, ProcArgs}},
+                {host, RemoteAddress},
+                {stream_count, 0}
+              ]),
+              State = #state{
+                table_name = TableName,
+                stream_counter = 0,
+                data = StreamTable,
+                holders = HoldersTable,
+                finished = false
+              },
+              {ok, State};
+            [read] ->
+              [{stream_count, Count}] = dets:lookup(StreamTable, stream_count),
+              State = #state{
+                table_name = TableName,
+                stream_counter = Count,
+                data = StreamTable,
+                holders = HoldersTable,
+                finished = true
+              },
+              {ok, State}
+          end;
         {error, {file_error, _, Reason}} ->
           ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
           {stop, Reason};
