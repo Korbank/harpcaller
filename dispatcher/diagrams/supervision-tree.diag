@@ -11,13 +11,31 @@ blockdiag {
   korrpcdid_tcp_sup -> korrpcdid_tcp_listener;
   korrpcdid_tcp_sup -> korrpcdid_tcp_worker_sup;
   korrpcdid_tcp_worker_sup -> korrpcdid_tcp_worker;
-  korrpc_sdb_sup -> korrpc_sdb;
   korrpcdid_caller_sup -> korrpcdid_caller;
+  korrpc_sdb_sup -> korrpc_sdb;
 
   korrpcdid_tcp_listener  [stacked];
   korrpcdid_tcp_worker    [stacked];
   korrpcdid_caller        [stacked];
   korrpc_sdb              [stacked];
+
+  group data_serving {
+    color = "#E6FFCC";
+    korrpcdid_tcp_sup;
+    korrpcdid_tcp_listener;
+    korrpcdid_tcp_worker_sup;
+    korrpcdid_tcp_worker;
+  }
+  group calling_rpc {
+    color = "#CCFFFF";
+    korrpcdid_caller_sup;
+    korrpcdid_caller;
+  }
+  group storing_results {
+    color = "#FFCCCC";
+    korrpc_sdb_sup;
+    korrpc_sdb;
+  }
 }
 
 // vim:ft=dot

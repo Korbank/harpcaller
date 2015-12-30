@@ -20,21 +20,40 @@
   korrpcdid_tcp_sup -&gt; korrpcdid_tcp_listener;
   korrpcdid_tcp_sup -&gt; korrpcdid_tcp_worker_sup;
   korrpcdid_tcp_worker_sup -&gt; korrpcdid_tcp_worker;
-  korrpc_sdb_sup -&gt; korrpc_sdb;
   korrpcdid_caller_sup -&gt; korrpcdid_caller;
+  korrpc_sdb_sup -&gt; korrpc_sdb;
 
   korrpcdid_tcp_listener  [stacked];
   korrpcdid_tcp_worker    [stacked];
   korrpcdid_caller        [stacked];
   korrpc_sdb              [stacked];
+
+  group data_serving {
+    color = "#E6FFCC";
+    korrpcdid_tcp_sup;
+    korrpcdid_tcp_listener;
+    korrpcdid_tcp_worker_sup;
+    korrpcdid_tcp_worker;
+  }
+  group calling_rpc {
+    color = "#CCFFFF";
+    korrpcdid_caller_sup;
+    korrpcdid_caller;
+  }
+  group storing_results {
+    color = "#FFCCCC";
+    korrpc_sdb_sup;
+    korrpc_sdb;
+  }
 }
 
 // vim:ft=dot
 </desc>
+  <rect fill="rgb(230,255,204)" height="220" style="filter:url(#filter_blur)" width="400" x="56" y="110" />
+  <rect fill="rgb(204,255,255)" height="140" style="filter:url(#filter_blur)" width="176" x="504" y="110" />
+  <rect fill="rgb(255,204,204)" height="140" style="filter:url(#filter_blur)" width="176" x="728" y="110" />
   <path d="M 75 46 L 219 46 A8,8 0 0 1 227 54 L 227 78 A8,8 0 0 1 219 86 L 75 86 A8,8 0 0 1 67 78 L 67 54 A8,8 0 0 1 75 46" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 75 126 L 219 126 A8,8 0 0 1 227 134 L 227 158 A8,8 0 0 1 219 166 L 75 166 A8,8 0 0 1 67 158 L 67 134 A8,8 0 0 1 75 126" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
-  <path d="M 523 126 L 667 126 A8,8 0 0 1 675 134 L 675 158 A8,8 0 0 1 667 166 L 523 166 A8,8 0 0 1 515 158 L 515 134 A8,8 0 0 1 523 126" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
-  <path d="M 747 126 L 891 126 A8,8 0 0 1 899 134 L 899 158 A8,8 0 0 1 891 166 L 747 166 A8,8 0 0 1 739 158 L 739 134 A8,8 0 0 1 747 126" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 83 214 L 227 214 A8,8 0 0 1 235 222 L 235 246 A8,8 0 0 1 227 254 L 83 254 A8,8 0 0 1 75 246 L 75 222 A8,8 0 0 1 83 214" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 79 210 L 223 210 A8,8 0 0 1 231 218 L 231 242 A8,8 0 0 1 223 250 L 79 250 A8,8 0 0 1 71 242 L 71 218 A8,8 0 0 1 79 210" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 75 206 L 219 206 A8,8 0 0 1 227 214 L 227 238 A8,8 0 0 1 219 246 L 75 246 A8,8 0 0 1 67 238 L 67 214 A8,8 0 0 1 75 206" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
@@ -42,20 +61,18 @@
   <path d="M 307 294 L 451 294 A8,8 0 0 1 459 302 L 459 326 A8,8 0 0 1 451 334 L 307 334 A8,8 0 0 1 299 326 L 299 302 A8,8 0 0 1 307 294" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 303 290 L 447 290 A8,8 0 0 1 455 298 L 455 322 A8,8 0 0 1 447 330 L 303 330 A8,8 0 0 1 295 322 L 295 298 A8,8 0 0 1 303 290" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 299 286 L 443 286 A8,8 0 0 1 451 294 L 451 318 A8,8 0 0 1 443 326 L 299 326 A8,8 0 0 1 291 318 L 291 294 A8,8 0 0 1 299 286" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
-  <path d="M 755 214 L 899 214 A8,8 0 0 1 907 222 L 907 246 A8,8 0 0 1 899 254 L 755 254 A8,8 0 0 1 747 246 L 747 222 A8,8 0 0 1 755 214" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
-  <path d="M 751 210 L 895 210 A8,8 0 0 1 903 218 L 903 242 A8,8 0 0 1 895 250 L 751 250 A8,8 0 0 1 743 242 L 743 218 A8,8 0 0 1 751 210" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
-  <path d="M 747 206 L 891 206 A8,8 0 0 1 899 214 L 899 238 A8,8 0 0 1 891 246 L 747 246 A8,8 0 0 1 739 238 L 739 214 A8,8 0 0 1 747 206" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
+  <path d="M 523 126 L 667 126 A8,8 0 0 1 675 134 L 675 158 A8,8 0 0 1 667 166 L 523 166 A8,8 0 0 1 515 158 L 515 134 A8,8 0 0 1 523 126" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 531 214 L 675 214 A8,8 0 0 1 683 222 L 683 246 A8,8 0 0 1 675 254 L 531 254 A8,8 0 0 1 523 246 L 523 222 A8,8 0 0 1 531 214" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 527 210 L 671 210 A8,8 0 0 1 679 218 L 679 242 A8,8 0 0 1 671 250 L 527 250 A8,8 0 0 1 519 242 L 519 218 A8,8 0 0 1 527 210" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 523 206 L 667 206 A8,8 0 0 1 675 214 L 675 238 A8,8 0 0 1 667 246 L 523 246 A8,8 0 0 1 515 238 L 515 214 A8,8 0 0 1 523 206" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
+  <path d="M 747 126 L 891 126 A8,8 0 0 1 899 134 L 899 158 A8,8 0 0 1 891 166 L 747 166 A8,8 0 0 1 739 158 L 739 134 A8,8 0 0 1 747 126" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
+  <path d="M 755 214 L 899 214 A8,8 0 0 1 907 222 L 907 246 A8,8 0 0 1 899 254 L 755 254 A8,8 0 0 1 747 246 L 747 222 A8,8 0 0 1 755 214" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
+  <path d="M 751 210 L 895 210 A8,8 0 0 1 903 218 L 903 242 A8,8 0 0 1 895 250 L 751 250 A8,8 0 0 1 743 242 L 743 218 A8,8 0 0 1 751 210" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
+  <path d="M 747 206 L 891 206 A8,8 0 0 1 899 214 L 899 238 A8,8 0 0 1 891 246 L 747 246 A8,8 0 0 1 739 238 L 739 214 A8,8 0 0 1 747 206" fill="rgb(0,0,0)" stroke="rgb(0,0,0)" style="filter:url(#filter_blur);opacity:0.7;fill-opacity:1" />
   <path d="M 72 40 L 216 40 A8,8 0 0 1 224 48 L 224 72 A8,8 0 0 1 216 80 L 72 80 A8,8 0 0 1 64 72 L 64 48 A8,8 0 0 1 72 40" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="105" y="66">korrpcdid_sup</text>
   <path d="M 72 120 L 216 120 A8,8 0 0 1 224 128 L 224 152 A8,8 0 0 1 216 160 L 72 160 A8,8 0 0 1 64 152 L 64 128 A8,8 0 0 1 72 120" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="93" y="146">korrpcdid_tcp_sup</text>
-  <path d="M 520 120 L 664 120 A8,8 0 0 1 672 128 L 672 152 A8,8 0 0 1 664 160 L 520 160 A8,8 0 0 1 512 152 L 512 128 A8,8 0 0 1 520 120" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
-  <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="532" y="146">korrpcdid_caller_sup</text>
-  <path d="M 744 120 L 888 120 A8,8 0 0 1 896 128 L 896 152 A8,8 0 0 1 888 160 L 744 160 A8,8 0 0 1 736 152 L 736 128 A8,8 0 0 1 744 120" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
-  <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="774" y="146">korrpc_sdb_sup</text>
   <path d="M 80 208 L 224 208 A8,8 0 0 1 232 216 L 232 240 A8,8 0 0 1 224 248 L 80 248 A8,8 0 0 1 72 240 L 72 216 A8,8 0 0 1 80 208" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <path d="M 76 204 L 220 204 A8,8 0 0 1 228 212 L 228 236 A8,8 0 0 1 220 244 L 76 244 A8,8 0 0 1 68 236 L 68 212 A8,8 0 0 1 76 204" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <path d="M 72 200 L 216 200 A8,8 0 0 1 224 208 L 224 232 A8,8 0 0 1 216 240 L 72 240 A8,8 0 0 1 64 232 L 64 208 A8,8 0 0 1 72 200" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
@@ -66,14 +83,18 @@
   <path d="M 300 284 L 444 284 A8,8 0 0 1 452 292 L 452 316 A8,8 0 0 1 444 324 L 300 324 A8,8 0 0 1 292 316 L 292 292 A8,8 0 0 1 300 284" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <path d="M 296 280 L 440 280 A8,8 0 0 1 448 288 L 448 312 A8,8 0 0 1 440 320 L 296 320 A8,8 0 0 1 288 312 L 288 288 A8,8 0 0 1 296 280" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="308" y="306">korrpcdid_tcp_worker</text>
-  <path d="M 752 208 L 896 208 A8,8 0 0 1 904 216 L 904 240 A8,8 0 0 1 896 248 L 752 248 A8,8 0 0 1 744 240 L 744 216 A8,8 0 0 1 752 208" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
-  <path d="M 748 204 L 892 204 A8,8 0 0 1 900 212 L 900 236 A8,8 0 0 1 892 244 L 748 244 A8,8 0 0 1 740 236 L 740 212 A8,8 0 0 1 748 204" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
-  <path d="M 744 200 L 888 200 A8,8 0 0 1 896 208 L 896 232 A8,8 0 0 1 888 240 L 744 240 A8,8 0 0 1 736 232 L 736 208 A8,8 0 0 1 744 200" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
-  <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="786" y="226">korrpc_sdb</text>
+  <path d="M 520 120 L 664 120 A8,8 0 0 1 672 128 L 672 152 A8,8 0 0 1 664 160 L 520 160 A8,8 0 0 1 512 152 L 512 128 A8,8 0 0 1 520 120" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
+  <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="532" y="146">korrpcdid_caller_sup</text>
   <path d="M 528 208 L 672 208 A8,8 0 0 1 680 216 L 680 240 A8,8 0 0 1 672 248 L 528 248 A8,8 0 0 1 520 240 L 520 216 A8,8 0 0 1 528 208" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <path d="M 524 204 L 668 204 A8,8 0 0 1 676 212 L 676 236 A8,8 0 0 1 668 244 L 524 244 A8,8 0 0 1 516 236 L 516 212 A8,8 0 0 1 524 204" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <path d="M 520 200 L 664 200 A8,8 0 0 1 672 208 L 672 232 A8,8 0 0 1 664 240 L 520 240 A8,8 0 0 1 512 232 L 512 208 A8,8 0 0 1 520 200" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
   <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="544" y="226">korrpcdid_caller</text>
+  <path d="M 744 120 L 888 120 A8,8 0 0 1 896 128 L 896 152 A8,8 0 0 1 888 160 L 744 160 A8,8 0 0 1 736 152 L 736 128 A8,8 0 0 1 744 120" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
+  <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="774" y="146">korrpc_sdb_sup</text>
+  <path d="M 752 208 L 896 208 A8,8 0 0 1 904 216 L 904 240 A8,8 0 0 1 896 248 L 752 248 A8,8 0 0 1 744 240 L 744 216 A8,8 0 0 1 752 208" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
+  <path d="M 748 204 L 892 204 A8,8 0 0 1 900 212 L 900 236 A8,8 0 0 1 892 244 L 748 244 A8,8 0 0 1 740 236 L 740 212 A8,8 0 0 1 748 204" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
+  <path d="M 744 200 L 888 200 A8,8 0 0 1 896 208 L 896 232 A8,8 0 0 1 888 240 L 744 240 A8,8 0 0 1 736 232 L 736 208 A8,8 0 0 1 744 200" fill="rgb(255,255,255)" stroke="rgb(0,0,0)" />
+  <text fill="rgb(0,0,0)" font-family="sansserif" font-size="11" font-style="normal" font-weight="normal" x="786" y="226">korrpc_sdb</text>
   <path d="M 144 80 L 144 112" fill="none" stroke="rgb(0,0,0)" />
   <polygon fill="rgb(0,0,0)" points="144,119 140,112 148,112 144,119" stroke="rgb(0,0,0)" />
   <path d="M 144 80 L 144 100" fill="none" stroke="rgb(0,0,0)" />
@@ -90,10 +111,10 @@
   <path d="M 144 180 L 368 180" fill="none" stroke="rgb(0,0,0)" />
   <path d="M 368 180 L 368 192" fill="none" stroke="rgb(0,0,0)" />
   <polygon fill="rgb(0,0,0)" points="368,199 364,192 372,192 368,199" stroke="rgb(0,0,0)" />
+  <path d="M 368 240 L 368 272" fill="none" stroke="rgb(0,0,0)" />
+  <polygon fill="rgb(0,0,0)" points="368,279 364,272 372,272 368,279" stroke="rgb(0,0,0)" />
   <path d="M 592 160 L 592 192" fill="none" stroke="rgb(0,0,0)" />
   <polygon fill="rgb(0,0,0)" points="592,199 588,192 596,192 592,199" stroke="rgb(0,0,0)" />
   <path d="M 816 160 L 816 192" fill="none" stroke="rgb(0,0,0)" />
   <polygon fill="rgb(0,0,0)" points="816,199 812,192 820,192 816,199" stroke="rgb(0,0,0)" />
-  <path d="M 368 240 L 368 272" fill="none" stroke="rgb(0,0,0)" />
-  <polygon fill="rgb(0,0,0)" points="368,279 364,272 372,272 368,279" stroke="rgb(0,0,0)" />
 </svg>
