@@ -1,6 +1,41 @@
 %%%----------------------------------------------------------------------------
 %%% @doc
 %%%   Stream result database reading/writing.
+%%%
+%%%   <h2><a name="sdb-content">Database Files</a></h2>
+%%%
+%%%   Database files written by this module are {@link dets} files that store
+%%%   several records, some of them optional.
+%%%
+%%%   <ul>
+%%%     <li>{@type @{procedure, @{korrpc:procedure(), [korrpc:argument()]@}@}}
+%%%         -- always stored</li>
+%%%     <li>{@type @{host, @{inet:hostname() | inet:ip_address(),
+%%%           inet:port_number()@}@}} -- always stored</li>
+%%%     <li>{@type @{job_start, Epoch :: integer()@}} -- always stored</li>
+%%%     <li>{@type @{job_end, Epoch :: integer()@}} -- for jobs that ended (in
+%%%         whatever manner), this record will be present; it will be missing
+%%%         if the job is still running (obviously) or if KorRPC dispatcher
+%%%         was stopped without opportunity to write anything to disk (e.g. on
+%%%         hard reboot)</li>
+%%%     <li>{@type @{stream_count, C :: non_neg_integer()@}} -- record telling
+%%%         how many stream records the job produced; always stored with
+%%%         `C = 0' and later updated as stream records arrive</li>
+%%%     <li>{@type @{N :: non_neg_integer(), Record ::
+%%%           korrpc:stream_record()@}} -- records streamed by the
+%%%         job; `N' starts with 0 and the largest in database is equal to
+%%%         `C - 1'</li>
+%%%     <li>{@type @{result, @{return, korrpc:result()@}@}} -- call ended
+%%%         successfully; stored along with `{job_end, Epoch}'</li>
+%%%     <li>{@type @{result, cancelled@}} -- call was cancelled; stored along
+%%%         with `{job_end, Epoch}'</li>
+%%%     <li>{@type @{result, @{exception, korrpc:error_description()@}@}} --
+%%%         call ended with an exception raised in the remote procedure;
+%%%         stored along with `{job_end, Epoch}'</li>
+%%%     <li>{@type @{result, @{error, korrpc:error_description() | term()@}@}}
+%%%         -- call encountered an error; stored along with `{job_end,
+%%%         Epoch}'</li>
+%%%   </ul>
 %%% @end
 %%%----------------------------------------------------------------------------
 
