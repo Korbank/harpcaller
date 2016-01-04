@@ -6,11 +6,13 @@ blockdiag {
   //span_width = 40;
 
   korrpcdid_sup -> korrpcdid_tcp_sup;
-  korrpcdid_sup -> korrpcdid_caller_sup;
+  korrpcdid_sup -> korrpcdid_call_sup;
   korrpcdid_sup -> korrpc_sdb_sup;
   korrpcdid_tcp_sup -> korrpcdid_tcp_listener;
   korrpcdid_tcp_sup -> korrpcdid_tcp_worker_sup;
   korrpcdid_tcp_worker_sup -> korrpcdid_tcp_worker;
+  korrpcdid_call_sup -> korrpcdid_call_queue;
+  korrpcdid_call_sup -> korrpcdid_caller_sup;
   korrpcdid_caller_sup -> korrpcdid_caller;
   korrpc_sdb_sup -> korrpc_sdb;
 
@@ -27,7 +29,9 @@ blockdiag {
     korrpcdid_tcp_worker;
   }
   group calling_rpc {
-    color = "#CCFFFF";
+    color = "#E6CCFF";
+    korrpcdid_call_sup;
+    korrpcdid_call_queue;
     korrpcdid_caller_sup;
     korrpcdid_caller;
   }
@@ -36,6 +40,9 @@ blockdiag {
     korrpc_sdb_sup;
     korrpc_sdb;
   }
+  //group ... {
+  //  color = "#CCFFFF";
+  //}
 }
 
 // vim:ft=dot
