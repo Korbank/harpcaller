@@ -23,6 +23,8 @@
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 -export([code_change/3]).
 
+-export_type([hostname/0]).
+
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
@@ -44,11 +46,12 @@
 -include("korrpcdid_caller.hrl").
 
 -define(RPC_READ_INTERVAL, 100).
+-define(KORRPC_PORT, 1638).
+
+-type hostname() :: inet:hostname() | inet:ip_address() | binary().
 
 -type call_option() ::
-    {port, inet:port_number()}
-  %| {credentials, term()}
-  | {timeout, timeout()}
+    {timeout, timeout()}
   | {max_exec_time, timeout()}.
 
 % }}}
@@ -60,8 +63,7 @@
 
 %% @doc Spawn a (supervised) caller process to call remote procedure.
 
--spec call(korrpc:procedure(), [korrpc:argument()],
-           inet:hostname() | inet:ip_address() | binary()) ->
+-spec call(korrpc:procedure(), [korrpc:argument()], hostname()) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 call(Procedure, Args, Host) ->
@@ -69,8 +71,8 @@ call(Procedure, Args, Host) ->
 
 %% @doc Spawn a (supervised) caller process to call remote procedure.
 
--spec call(korrpc:procedure(), [korrpc:argument()],
-           inet:hostname() | inet:ip_address() | binary(), [call_option()]) ->
+-spec call(korrpc:procedure(), [korrpc:argument()], hostname(),
+           [call_option()]) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 call(Procedure, Args, Host, Options) when is_binary(Host) ->
@@ -221,10 +223,10 @@ terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
 
 handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
             State = #state{job_id = JobID, call = undefined}) ->
-  {Port, Timeout, MaxExecTime} = decode_options(Options),
-  case korrpc_sdb:new(JobID, Procedure, ProcArgs, {Host, Port}) of
+  {Timeout, MaxExecTime} = decode_options(Options),
+  case korrpc_sdb:new(JobID, Procedure, ProcArgs, Host) of
     {ok, StreamTable} ->
-      case korrpc:request(Procedure, ProcArgs, [{host, Host}, {port, Port}]) of
+      case korrpc:request(Procedure, ProcArgs, [{host, Host}, {port, ?KORRPC_PORT}]) of
         {ok, Handle} ->
           Now = now(),
           NewState = State#state{
@@ -348,10 +350,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%---------------------------------------------------------------------------
 
 -spec decode_options([call_option()]) ->
-  {Port :: inet:port_number(), Timeout :: timeout(), MaxExecTime :: timeout()}.
+  {Timeout :: timeout(), MaxExecTime :: timeout()}.
 
 decode_options(Options) ->
-  Port = proplists:get_value(port, Options, 1638),
   T = proplists:get_value(timeout, Options),
   {ok, TA} = application:get_env(default_timeout),
   E = proplists:get_value(max_exec_time, Options),
@@ -368,7 +369,7 @@ decode_options(Options) ->
     {_, _} when E  > EA -> EA * 1000;
     {_, _} when E =< EA -> E  * 1000
   end,
-  {Port, Timeout, MaxExecTime}.
+  {Timeout, MaxExecTime}.
 
 notify_followers(_State = #state{followers = Followers}, Message) ->
   ets:foldl(fun send_message/2, Message, Followers),

@@ -10,8 +10,7 @@
 %%%   <ul>
 %%%     <li>{@type @{procedure, @{korrpc:procedure(), [korrpc:argument()]@}@}}
 %%%         -- always stored</li>
-%%%     <li>{@type @{host, @{inet:hostname() | inet:ip_address(),
-%%%           inet:port_number()@}@}} -- always stored</li>
+%%%     <li>{@type @{host, address()@}} -- always stored</li>
 %%%     <li>{@type @{job_start, Epoch :: integer()@}} -- always stored</li>
 %%%     <li>{@type @{job_end, Epoch :: integer()@}} -- for jobs that ended (in
 %%%         whatever manner), this record will be present; it will be missing
@@ -75,9 +74,11 @@
 -type table_name() :: string().
 %% UUID string representation.
 
+-type address() :: term().
+
 -include("korrpc_sdb.hrl").
 
-% }}}
+%%% }}}
 %%%---------------------------------------------------------------------------
 %%% public interface
 %%%---------------------------------------------------------------------------
@@ -87,8 +88,7 @@
 
 %% @doc Create new, empty table.
 
--spec new(table_name(), korrpc:procedure(), [korrpc:argument()],
-          {inet:hostname() | inet:ip_address(), inet:port_number()}) ->
+-spec new(table_name(), korrpc:procedure(), [korrpc:argument()], address()) ->
   {ok, handle()} | {error, term()}.
 
 new(TableName, Procedure, ProcArgs, RemoteAddress) ->
