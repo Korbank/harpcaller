@@ -34,7 +34,8 @@
 -record(state, {
   job_id       :: korrpcdid:job_id(),
   stream_table :: korrpc_sdb:handle(),
-  call         :: korrpc:handle(),
+  call         :: korrpc:handle() | {queued, reference()},
+  request      :: {korrpc:procedure(), [korrpc:argument()], hostname()},
   followers    :: ets:tab(),
   count = 0    :: non_neg_integer(),
   start_time   :: erlang:timestamp(),
@@ -52,7 +53,10 @@
 
 -type call_option() ::
     {timeout, timeout()}
-  | {max_exec_time, timeout()}.
+  | {max_exec_time, timeout()}
+  | {'queue', korrpcdid_call_queue:queue_name() |
+              {korrpcdid_call_queue:queue_name(),
+                Concurrency :: pos_integer()}}.
 
 % }}}
 %%%---------------------------------------------------------------------------
@@ -67,7 +71,7 @@
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 call(Procedure, Args, Host) ->
-  call(Procedure, Args, Host, [{port, 1638}]).
+  call(Procedure, Args, Host, []).
 
 %% @doc Spawn a (supervised) caller process to call remote procedure.
 
@@ -223,27 +227,40 @@ terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
 
 handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
             State = #state{job_id = JobID, call = undefined}) ->
-  {Timeout, MaxExecTime} = decode_options(Options),
+  {Timeout, MaxExecTime, Queue} = decode_options(Options),
   case korrpc_sdb:new(JobID, Procedure, ProcArgs, Host) of
     {ok, StreamTable} ->
-      case korrpc:request(Procedure, ProcArgs, [{host, Host}, {port, ?KORRPC_PORT}]) of
-        {ok, Handle} ->
-          Now = now(),
-          NewState = State#state{
-            stream_table = StreamTable,
-            call = Handle,
-            start_time = Now,
-            last_read = Now,
-            max_exec_time = MaxExecTime,
-            timeout = Timeout
+      FilledState = State#state{
+        stream_table = StreamTable,
+        request = {Procedure, ProcArgs, Host},
+        max_exec_time = MaxExecTime,
+        timeout = Timeout
+      },
+      case Queue of
+        undefined ->
+          % execute immediately
+          case start_request(FilledState) of
+            {ok, Handle} ->
+              Now = now(),
+              NewState = FilledState#state{
+                call = Handle,
+                start_time = Now,
+                last_read = Now
+              },
+              {reply, {ok, JobID}, NewState, 0};
+            {error, Reason} ->
+              korrpc_sdb:set_result(StreamTable, {error, Reason}),
+              % request itself failed, but the job was carried successfully;
+              % tell the parent that that part got done
+              {stop, {call, Reason}, {ok, JobID}, FilledState}
+          end;
+        {QueueName, Concurrency} ->
+          % enqueue and wait for a message
+          QRef = korrpcdid_call_queue:enqueue(QueueName, Concurrency),
+          NewState = FilledState#state{
+            call = {queued, QRef}
           },
-          {reply, {ok, JobID}, NewState, 0};
-        {error, Reason} ->
-          korrpc_sdb:set_result(StreamTable, {error, Reason}),
-          NewState = State#state{stream_table = StreamTable},
-          % request itself failed, but the job was carried successfully; tell
-          % the parent that that part got done
-          {stop, {call, Reason}, {ok, JobID}, NewState}
+          {reply, {ok, JobID}, NewState}
       end;
     {error, Reason} ->
       % operational and (mostly) unexpected error; signal crashing
@@ -285,6 +302,30 @@ handle_info({'DOWN', Ref, process, Pid, _Reason} = _Message,
             State = #state{followers = Followers}) ->
   ets:delete_object(Followers, {Pid, Ref}),
   {noreply, State, 0};
+
+handle_info({go, QRef} = _Message,
+            State = #state{call = {queued, QRef},
+                           stream_table = StreamTable}) ->
+  case start_request(State) of
+    {ok, Handle} ->
+      % TODO: denote dequeueing in `StreamTable'
+      Now = now(),
+      NewState = State#state{
+        call = Handle,
+        start_time = Now,
+        last_read = Now
+      },
+      {noreply, NewState, 0};
+    {error, Reason} ->
+      korrpc_sdb:set_result(StreamTable, {error, Reason}),
+      % request itself failed, but the job was carried successfully;
+      % tell the parent that that part got done
+      {stop, {call, Reason}, State}
+  end;
+
+handle_info(timeout = _Message, State = #state{call = {queued, _QRef}}) ->
+  % go back to sleep, typically after `follow_stream()' on a queued job
+  {noreply, State};
 
 handle_info(timeout = _Message,
             State = #state{call = Handle, stream_table = StreamTable,
@@ -350,13 +391,22 @@ code_change(_OldVsn, State, _Extra) ->
 %%%---------------------------------------------------------------------------
 
 -spec decode_options([call_option()]) ->
-  {Timeout :: timeout(), MaxExecTime :: timeout()}.
+  {Timeout :: timeout(), MaxExecTime :: timeout(),
+    Queue :: {korrpcdid_call_queue:queue_name(), pos_integer()} | undefined}.
 
 decode_options(Options) ->
   T = proplists:get_value(timeout, Options),
   {ok, TA} = application:get_env(default_timeout),
   E = proplists:get_value(max_exec_time, Options),
   {ok, EA} = application:get_env(max_exec_time),
+  Queue = case proplists:get_value('queue', Options) of
+    undefined ->
+      undefined;
+    {QueueName, Concurrency} when is_integer(Concurrency), Concurrency > 0 ->
+      {QueueName, Concurrency};
+    QueueName ->
+      {QueueName, 1}
+  end,
   Timeout = case {T, TA} of
     {undefined, _}      -> TA * 1000;
     {infinity, _}       -> T; % effect limited by `MaxExecTime' anyway
@@ -369,7 +419,7 @@ decode_options(Options) ->
     {_, _} when E  > EA -> EA * 1000;
     {_, _} when E =< EA -> E  * 1000
   end,
-  {Timeout, MaxExecTime}.
+  {Timeout, MaxExecTime, Queue}.
 
 notify_followers(_State = #state{followers = Followers}, Message) ->
   ets:foldl(fun send_message/2, Message, Followers),
@@ -379,6 +429,13 @@ send_message({Pid, _Ref} = _Entry, Message) ->
   Pid ! Message,
   % `Message' is actually an accumulator, but it works well this way
   Message.
+
+-spec start_request(#state{}) ->
+  {ok, korrpc:handle()} | {error, term()}.
+
+start_request(_State = #state{request = {Procedure, ProcArgs, Host}}) ->
+  RequestOpts = [{host, Host}, {port, ?KORRPC_PORT}],
+  korrpc:request(Procedure, ProcArgs, RequestOpts).
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
