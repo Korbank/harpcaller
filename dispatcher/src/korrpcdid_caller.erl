@@ -14,6 +14,7 @@
 %% public interface
 -export([call/3, call/4, locate/1]).
 -export([cancel/1, get_result/1, follow_stream/1]).
+-export([job_id/1]).
 
 %% supervision tree API
 -export([start/4, start_link/4]).
@@ -94,6 +95,19 @@ locate(JobID) when is_list(JobID) ->
     [{JobID, Pid}] -> {ok, Pid};
     [] -> none
   end.
+
+%% @doc Determine job ID of a process.
+%%
+%%   This function is for inspection purposes. The process should be {@link
+%%   korrpcdid_caller}, otherwise the call may fail in any unexpected way. You
+%%   should probably also catch `gen_server:call/2' dying, in case `Pid' has
+%%   just terminated.
+
+-spec job_id(pid()) ->
+  korrpcdid:job_id().
+
+job_id(Pid) when is_pid(Pid) ->
+  gen_server:call(Pid, job_id).
 
 %% @doc Send a request to caller process responsible for a job.
 
@@ -273,6 +287,9 @@ handle_call({follow, Pid} = _Request, _From,
   Ref = erlang:monitor(process, Pid),
   ets:insert(Followers, {Pid, Ref}),
   {reply, ok, State, 0};
+
+handle_call(job_id = _Request, _From, State = #state{job_id = JobID}) ->
+  {reply, JobID, State, 0};
 
 handle_call(get_sdb = _Request, _From,
             State = #state{stream_table = StreamTable}) ->
