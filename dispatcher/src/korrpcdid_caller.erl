@@ -303,6 +303,13 @@ handle_info({'DOWN', Ref, process, Pid, _Reason} = _Message,
   ets:delete_object(Followers, {Pid, Ref}),
   {noreply, State, 0};
 
+handle_info({cancel, _QRef} = _Message,
+            State = #state{stream_table = StreamTable, job_id = JobID}) ->
+  % NOTE: the same as `cancel()' call, except it's a message
+  notify_followers(State, {terminated, JobID, cancelled}),
+  korrpc_sdb:set_result(StreamTable, cancelled),
+  {stop, normal, State};
+
 handle_info({go, QRef} = _Message,
             State = #state{call = {queued, QRef},
                            stream_table = StreamTable}) ->

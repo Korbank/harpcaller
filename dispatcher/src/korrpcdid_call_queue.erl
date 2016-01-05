@@ -10,6 +10,7 @@
 
 %% public interface
 -export([enqueue/2]).
+-export([cancel/1]).
 
 %% supervision tree API
 -export([start/0, start_link/0]).
@@ -61,12 +62,30 @@
 %%   Function returns a queue reference `QRef'. When the time comes (the
 %%   requested queue has less than `Concurrency' running processes), the
 %%   calling process will get `{go, QRef}' message.
+%%
+%%   If the queue ever gets deleted ({@link cancel/1}), each enqueued process
+%%   (either waiting for its turn or already running) will receive
+%%   `{cancel, QRef}' message.
 
 -spec enqueue(queue_name(), pos_integer()) ->
   reference().
 
 enqueue(QueueName, Concurrency) when is_integer(Concurrency), Concurrency > 0 ->
   gen_server:call(?MODULE, {enqueue, self(), QueueName, Concurrency}).
+
+%% @doc Delete a queue, cancelling everything in it.
+%%
+%%   <b>NOTE</b>: This function is more of an administrative one than
+%%   something to lean your architecture on. It returns as soon as the tasks
+%%   are sent notifications to should shut down and allows the queue to
+%%   terminate in its normal way. If some task comes to the queue just after
+%%   notifications were sent, the queue will not get deleted in effect.
+
+-spec cancel(queue_name()) ->
+  ok.
+
+cancel(QueueName) ->
+  gen_server:call(?MODULE, {cancel, QueueName}).
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
@@ -138,6 +157,14 @@ handle_call({enqueue, Pid, QueueName, Concurrency} = _Request, _From, State) ->
       add_queued(Entry, QueueName, State)
   end,
   {reply, QRef, State};
+
+handle_call({cancel, QueueName} = _Request, _From, State) ->
+  [Pid ! {cancel, QRef} ||
+    #qentry{pid = Pid, qref = QRef} <- list_queued(QueueName, State)],
+  [Pid ! {cancel, QRef} ||
+    #qentry{pid = Pid, qref = QRef} <- list_running(QueueName, State)],
+  % XXX: deleting the queue will be done as `DOWN' messages arrive
+  {reply, ok, State};
 
 %% unknown calls
 handle_call(_Request, _From, State) ->
@@ -286,6 +313,17 @@ delete_running(Entry, QueueName,
 list_queued(QueueName, _State = #state{q = Queue}) ->
   % strip the key from result tuples
   [E || {{queued, _}, E} <- ets:lookup(Queue, {queued, QueueName})].
+
+%% @doc List tasks already running in specified queue.
+%%   Tasks are returned in order of their appearance, as {@link ets}
+%%   guarantees for tables of type `bag' (see {@link ets:lookup/2}).
+
+-spec list_running(queue_name(), #state{}) ->
+  [#qentry{}].
+
+list_running(QueueName, _State = #state{q = Queue}) ->
+  % strip the key from result tuples
+  [E || {{running, _}, E} <- ets:lookup(Queue, {running, QueueName})].
 
 %% @doc Mark the task as running and tell it to start.
 %%
