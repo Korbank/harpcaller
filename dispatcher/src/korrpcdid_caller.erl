@@ -440,7 +440,9 @@ send_message({Pid, _Ref} = _Entry, Message) ->
 -spec start_request(#state{}) ->
   {ok, korrpc:handle()} | {error, term()}.
 
-start_request(_State = #state{request = {Procedure, ProcArgs, Host}}) ->
+start_request(_State = #state{request = {Procedure, ProcArgs, Host},
+                              stream_table = StreamTable}) ->
+  korrpc_sdb:started(StreamTable),
   RequestOpts = [{host, Host}, {port, ?KORRPC_PORT}],
   korrpc:request(Procedure, ProcArgs, RequestOpts).
 

@@ -11,7 +11,9 @@
 %%%     <li>{@type @{procedure, @{korrpc:procedure(), [korrpc:argument()]@}@}}
 %%%         -- always stored</li>
 %%%     <li>{@type @{host, address()@}} -- always stored</li>
-%%%     <li>{@type @{job_start, Epoch :: integer()@}} -- always stored</li>
+%%%     <li>{@type @{job_submitted, Epoch :: integer()@}} -- always stored</li>
+%%%     <li>{@type @{job_start, Epoch :: integer()@}} -- for jobs that were
+%%%         started (released from waiting in a queue)</li>
 %%%     <li>{@type @{job_end, Epoch :: integer()@}} -- for jobs that ended (in
 %%%         whatever manner), this record will be present; it will be missing
 %%%         if the job is still running (obviously) or if KorRPC dispatcher
@@ -52,7 +54,7 @@
 
 %% public interface
 -export([new/4, load/1, close/1]).
--export([insert/2, set_result/2]).
+-export([started/1, insert/2, set_result/2]).
 -export([result/1, stream/2, stream_size/1]).
 
 -export_type([handle/0]).
@@ -127,6 +129,17 @@ close(Handle) ->
 %% }}}
 %%----------------------------------------------------------
 %% storing data that came from RPC call {{{
+
+%% @doc Mark the start of RPC call.
+%%
+%%   This is an important distinction, when the call was ordered and when it
+%%   actually started. This was introduced because of queued calls.
+
+-spec started(handle()) ->
+  ok.
+
+started(Handle) ->
+  gen_server:call(Handle, started).
 
 %% @doc Insert one record from stream from RPC call.
 
@@ -267,7 +280,7 @@ init([TableName, Pid | AccessModeAndArgs] = _Args) ->
               dets:insert(StreamTable, [
                 {procedure, {Procedure, ProcArgs}},
                 {host, RemoteAddress},
-                {job_start, timestamp()},
+                {job_submitted, timestamp()},
                 {stream_count, 0}
               ]),
               State = #state{
@@ -316,6 +329,15 @@ terminate(_Arg, _State = #state{data = StreamTable, holders = HoldersTable,
 
 %% @private
 %% @doc Handle {@link gen_server:call/2}.
+
+handle_call(started = _Request, _From, State = #state{data = StreamTable}) ->
+  case State of
+    #state{finished = true} ->
+      ignore;
+    #state{finished = false} ->
+      dets:insert(StreamTable, {job_start, timestamp()})
+  end,
+  {reply, ok, State};
 
 %% add record streamed by RPC call
 handle_call({add_stream, Record} = _Request, _From,
