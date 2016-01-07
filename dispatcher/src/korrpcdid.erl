@@ -10,14 +10,16 @@
 -export([start/0]).
 -export([generate_job_id/0]).
 
--export_type([job_id/0, hostname/0]).
+-export_type([job_id/0, hostname/0, address/0]).
 
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
 -type job_id() :: string().
 
--type hostname() :: inet:hostname() | inet:ip_address() | binary().
+-type hostname() :: binary().
+
+-type address() :: inet:hostname() | inet:ip_address().
 
 %%% }}}
 %%%---------------------------------------------------------------------------

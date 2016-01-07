@@ -76,8 +76,8 @@ call(Procedure, Args, Host) ->
            [call_option()]) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
-call(Procedure, Args, Host, Options) when is_binary(Host) ->
-  call(Procedure, Args, binary_to_list(Host), Options);
+call(Procedure, Args, Host, Options) when is_list(Host) ->
+  call(Procedure, Args, list_to_binary(Host), Options);
 call(Procedure, Args, Host, Options) when is_list(Options) ->
   korrpcdid_caller_sup:spawn_caller(Procedure, Args, Host, Options).
 
@@ -456,7 +456,8 @@ send_message({Pid, _Ref} = _Entry, Message) ->
 start_request(_State = #state{request = {Procedure, ProcArgs, Host},
                               stream_table = StreamTable}) ->
   korrpc_sdb:started(StreamTable),
-  RequestOpts = [{host, Host}, {port, ?KORRPC_PORT}],
+  % TODO: use `korrpcdid_hostdb:resolve(Host)'
+  RequestOpts = [{host, binary_to_list(Host)}, {port, ?KORRPC_PORT}],
   korrpc:request(Procedure, ProcArgs, RequestOpts).
 
 %%%---------------------------------------------------------------------------

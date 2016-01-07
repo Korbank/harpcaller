@@ -8,11 +8,14 @@
     korrpcdid_tcp_worker_sup
   ]},
   {applications, [kernel, stdlib, ssl, crypto]},
-  {mod, { korrpcdid_app, []}}, % callback module
+  {mod, {korrpcdid_app, []}}, % callback module
   {env, [
     %{stream_directory, ""},
-    {default_timeout, 600},
-    {max_exec_time, 600},
+    %{host_db_script, ""},
+    %{host_db, ""},
+    {host_db_refresh, 900}, % seconds (no more than ~4.3M, but is 49+ days that useful?)
+    {default_timeout, 600}, % seconds
+    {max_exec_time, 600}, % seconds
     {listen, [
       {any, 1639}
     ]}

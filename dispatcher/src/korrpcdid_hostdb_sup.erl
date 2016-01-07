@@ -1,10 +1,10 @@
 %%%---------------------------------------------------------------------------
 %%% @doc
-%%%   KorRPC dispatcher top-level supervisor.
+%%%   Address resolver subsystem supervisor.
 %%% @end
 %%%---------------------------------------------------------------------------
 
--module(korrpcdid_sup).
+-module(korrpcdid_hostdb_sup).
 
 -behaviour(supervisor).
 
@@ -34,14 +34,10 @@ start_link() ->
 init([] = _Args) ->
   Strategy = {one_for_one, 5, 10},
   Children = [
-    {korrpc_sdb_sup, {korrpc_sdb_sup, start_link, []},
-      permanent, 1000, worker, [korrpc_sdb_sup]},
-    {korrpcdid_call_sup, {korrpcdid_call_sup, start_link, []},
-      permanent, 1000, supervisor, [korrpcdid_call_sup]},
-    {korrpcdid_hostdb_sup, {korrpcdid_hostdb_sup, start_link, []},
-      permanent, 1000, supervisor, [korrpcdid_hostdb_sup]},
-    {korrpcdid_tcp_sup, {korrpcdid_tcp_sup, start_link, []},
-      permanent, 1000, supervisor, [korrpcdid_tcp_sup]}
+    {korrpcdid_hostdb, {korrpcdid_hostdb, start_link, []},
+      permanent, 1000, worker, [korrpcdid_hostdb]},
+    {korrpcdid_hostdb_refresh, {korrpcdid_hostdb_refresh, start_link, []},
+      permanent, 1000, worker, [korrpcdid_hostdb_refresh]}
   ],
   {ok, {Strategy, Children}}.
 
