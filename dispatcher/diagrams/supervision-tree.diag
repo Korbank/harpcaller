@@ -8,6 +8,7 @@ blockdiag {
   korrpcdid_sup -> korrpcdid_tcp_sup;
   korrpcdid_sup -> korrpcdid_call_sup;
   korrpcdid_sup -> korrpc_sdb_sup;
+  korrpcdid_sup -> korrpcdid_hostdb_sup;
   korrpcdid_tcp_sup -> korrpcdid_tcp_listener;
   korrpcdid_tcp_sup -> korrpcdid_tcp_worker_sup;
   korrpcdid_tcp_worker_sup -> korrpcdid_tcp_worker;
@@ -15,6 +16,8 @@ blockdiag {
   korrpcdid_call_sup -> korrpcdid_caller_sup;
   korrpcdid_caller_sup -> korrpcdid_caller;
   korrpc_sdb_sup -> korrpc_sdb;
+  korrpcdid_hostdb_sup -> korrpcdid_hostdb;
+  korrpcdid_hostdb_sup -> korrpcdid_hostdb_refresh;
 
   korrpcdid_tcp_listener  [stacked];
   korrpcdid_tcp_worker    [stacked];
@@ -40,9 +43,12 @@ blockdiag {
     korrpc_sdb_sup;
     korrpc_sdb;
   }
-  //group ... {
-  //  color = "#CCFFFF";
-  //}
+  group host_db {
+    color = "#CCFFFF";
+    korrpcdid_hostdb_sup;
+    korrpcdid_hostdb;
+    korrpcdid_hostdb_refresh;
+  }
 }
 
 // vim:ft=dot
