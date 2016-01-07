@@ -29,7 +29,7 @@
 %%   `Options' are passed to {@link korrpcdid_caller} (back) without change.
 
 -spec spawn_caller(korrpc:procedure(), [korrpc:argument()],
-                   korrpcdid_caller:hostname(), [term()]) ->
+                   korrpcdid:hostname(), [term()]) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 spawn_caller(Procedure, ProcArgs, Host, Options) ->

@@ -24,8 +24,6 @@
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 -export([code_change/3]).
 
--export_type([hostname/0]).
-
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
@@ -36,7 +34,7 @@
   job_id       :: korrpcdid:job_id(),
   stream_table :: korrpc_sdb:handle(),
   call         :: korrpc:handle() | {queued, reference()},
-  request      :: {korrpc:procedure(), [korrpc:argument()], hostname()},
+  request      :: {korrpc:procedure(), [korrpc:argument()], korrpcdid:hostname()},
   followers    :: ets:tab(),
   count = 0    :: non_neg_integer(),
   start_time   :: erlang:timestamp(),
@@ -49,8 +47,6 @@
 
 -define(RPC_READ_INTERVAL, 100).
 -define(KORRPC_PORT, 1638).
-
--type hostname() :: inet:hostname() | inet:ip_address() | binary().
 
 -type call_option() ::
     {timeout, timeout()}
@@ -68,7 +64,7 @@
 
 %% @doc Spawn a (supervised) caller process to call remote procedure.
 
--spec call(korrpc:procedure(), [korrpc:argument()], hostname()) ->
+-spec call(korrpc:procedure(), [korrpc:argument()], korrpcdid:hostname()) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
 call(Procedure, Args, Host) ->
@@ -76,7 +72,7 @@ call(Procedure, Args, Host) ->
 
 %% @doc Spawn a (supervised) caller process to call remote procedure.
 
--spec call(korrpc:procedure(), [korrpc:argument()], hostname(),
+-spec call(korrpc:procedure(), [korrpc:argument()], korrpcdid:hostname(),
            [call_option()]) ->
   {ok, pid(), korrpcdid:job_id()} | {error, term()}.
 
