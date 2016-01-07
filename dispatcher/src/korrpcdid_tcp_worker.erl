@@ -33,7 +33,9 @@
     Arguments :: korrpc_json:jarray() | korrpc_json:jhash(),
     Host :: binary(),
     Timeout :: timeout() | undefined,
-    MaxExecTime :: timeout() | undefined}.
+    MaxExecTime :: timeout() | undefined,
+    QueueSpec :: {Name :: korrpc_json:jhash(), Concurrency :: pos_integer()} |
+                 undefined}.
 
 -type request_cancel() :: {cancel, korrpcdid:job_id()}.
 
@@ -113,7 +115,7 @@ handle_cast(_Request, State) ->
 
 handle_info(timeout = _Message, State = #state{socket = Socket}) ->
   case read_request(Socket, ?TCP_READ_INTERVAL) of
-    {call, Proc, Args, Host, Timeout, MaxExecTime} -> % long running
+    {call, Proc, Args, Host, Timeout, MaxExecTime, Queue} -> % long running
       put('$worker_function', call),
       Options = case {Timeout, MaxExecTime} of
         {undefined, undefined} ->
@@ -125,8 +127,13 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
         {_, _} when is_integer(Timeout), is_integer(MaxExecTime) ->
           [{timeout, Timeout}, {max_exec_time, MaxExecTime}]
       end,
+      QueueOpts = case Queue of
+        undefined -> [];
+        {QueueName, Concurrency} -> [{'queue', {QueueName, Concurrency}}]
+      end,
       % TODO: allow non-default port to be used
-      {ok, _Pid, JobID} = korrpcdid_caller:call(Proc, Args, Host, Options),
+      {ok, _Pid, JobID} = korrpcdid_caller:call(Proc, Args, Host,
+                                                QueueOpts ++ Options),
       send_response(Socket, [
         {<<"korrpcdid">>, 1},
         {<<"job_id">>, list_to_binary(JobID)}
@@ -232,19 +239,41 @@ decode_request(Line) ->
   {ok, 1} = orddict:find(<<"korrpcdid">>, Request),
   Request1 = orddict:erase(<<"korrpcdid">>, Request),
   case Request1 of
+    % unqueued calls
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"procedure">>, Procedure}] ->
-      {call, Procedure, Args, Host, undefined, undefined};
+      {call, Procedure, Args, Host, undefined, undefined, undefined};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"procedure">>, Procedure}, {<<"timeout">>, Timeout}] ->
-      {call, Procedure, Args, Host, Timeout, undefined};
+      {call, Procedure, Args, Host, Timeout, undefined, undefined};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure}] ->
-      {call, Procedure, Args, Host, undefined, MaxExecTime};
+      {call, Procedure, Args, Host, undefined, MaxExecTime, undefined};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
       {<<"timeout">>, Timeout}] ->
-      {call, Procedure, Args, Host, Timeout, MaxExecTime};
+      {call, Procedure, Args, Host, Timeout, MaxExecTime, undefined};
+    % queued calls
+    [{<<"arguments">>, Args}, {<<"host">>, Host},
+      {<<"procedure">>, Procedure},
+      {<<"queue">>, QueueSpec}] ->
+      {call, Procedure, Args, Host, undefined, undefined,
+        parse_queue_spec(QueueSpec)};
+    [{<<"arguments">>, Args}, {<<"host">>, Host},
+      {<<"procedure">>, Procedure},
+      {<<"queue">>, QueueSpec}, {<<"timeout">>, Timeout}] ->
+      {call, Procedure, Args, Host, Timeout, undefined,
+        parse_queue_spec(QueueSpec)};
+    [{<<"arguments">>, Args}, {<<"host">>, Host},
+      {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
+      {<<"queue">>, QueueSpec}] ->
+      {call, Procedure, Args, Host, undefined, MaxExecTime,
+        parse_queue_spec(QueueSpec)};
+    [{<<"arguments">>, Args}, {<<"host">>, Host},
+      {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
+      {<<"queue">>, QueueSpec}, {<<"timeout">>, Timeout}] ->
+      {call, Procedure, Args, Host, Timeout, MaxExecTime,
+        parse_queue_spec(QueueSpec)};
 
     [{<<"cancel">>, JobID}] ->
       {cancel, binary_to_list(JobID)};
@@ -274,6 +303,24 @@ decode_request(Line) ->
     [{<<"read_stream">>, JobID}, {<<"since">>, Since}] ->
       {read_stream, binary_to_list(JobID), since, Since}
   end.
+
+%% @doc Parse queue specification from request.
+
+-spec parse_queue_spec(korrpc_json:jhash()) ->
+  {korrpc_json:jhash(), pos_integer()} | no_return().
+
+parse_queue_spec([{<<"concurrency">>, C},
+                   {<<"name">>, [{_,_}|_] = QueueName}] = _QueueSpec)
+when is_integer(C), C > 0 ->
+  {QueueName, C};
+parse_queue_spec([{<<"concurrency">>, C},
+                   {<<"name">>, [{}] = QueueName}] = _QueueSpec)
+when is_integer(C), C > 0 ->
+  {QueueName, C};
+parse_queue_spec([{<<"name">>, [{_,_}|_] = QueueName}] = _QueueSpec) ->
+  {QueueName, 1};
+parse_queue_spec([{<<"name">>, [{}] = QueueName}] = _QueueSpec) ->
+  {QueueName, 1}.
 
 %% @doc Encode a structure and send it as a response to client.
 
