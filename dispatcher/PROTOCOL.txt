@@ -17,6 +17,7 @@ Call request
   {"korrpcdid": 1, "host": "...", "procedure": "...", "arguments": [...]}
   {"korrpcdid": 1, "host": "...", "procedure": "...", "arguments": {...}}
   {"korrpcdid": 1, ..., "timeout": integer, "max_exec_time": integer}
+  {"korrpcdid": 1, ..., "queue": {"name": {...}, "concurrency": C}}
 
 Call may either use positional arguments or named arguments.
 Call with no arguments is indicated with an empty list.
@@ -26,6 +27,13 @@ time allowed between consequent messages (mainly: time when next stream
 message is expected); maximum execution time is total time between issuing
 a call request and receiving result. For procedures that do not stream their
 result, the two are equivalent.
+
+Request may set a queue where the call will wait for its turn. Queues are
+named, where the name is an arbitrary hash object. Queue may specify also
+its desired concurrency level (number of calls that are executed at the same
+time; if there are more calls in the queue than queue's concurrency level,
+some of them will be kept waiting until one or more currently executing calls
+terminate).
 
 Reply:
   {"korrpcdid": 1, "job_id": "..."}
