@@ -22,10 +22,14 @@
 
 -export_type([host_entry/0]).
 
+-include_lib("stdlib/include/ms_transform.hrl"). %% ets:fun2ms()
+
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
--record(state, {}).
+-record(state, {
+  table :: dets:tab_name()
+}).
 
 -type host_entry() :: {
   Name :: korrpcdid:hostname(),
@@ -45,8 +49,8 @@
 -spec resolve(korrpcdid:hostname()) ->
   korrpcdid_hostdb:host_entry() | none.
 
-resolve(_Hostname) ->
-  'TODO'.
+resolve(Hostname) when is_binary(Hostname) ->
+  gen_server:call(?MODULE, {resolve, Hostname}).
 
 %% @doc Force refreshing list of hosts out of regular schedule.
 
@@ -64,13 +68,13 @@ refresh() ->
 %% @doc Start example process.
 
 start() ->
-  gen_server:start(?MODULE, [], []).
+  gen_server:start({local, ?MODULE}, ?MODULE, [], []).
 
 %% @private
 %% @doc Start example process.
 
 start_link() ->
-  gen_server:start_link(?MODULE, [], []).
+  gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%%---------------------------------------------------------------------------
 %%% gen_server callbacks
@@ -83,13 +87,33 @@ start_link() ->
 %% @doc Initialize event handler.
 
 init(_Args) ->
-  State = #state{},
+  {ok, TableFile} = application:get_env(host_db),
+  {ok, Table} = dets:open_file(TableFile, [{type, set}]),
+  State = #state{
+    table = Table
+  },
+  {ok, RefreshInterval} = application:get_env(host_db_refresh),
+  {MS,S,_US} = os:timestamp(),
+  Timestamp = MS * 1000 * 1000 + S,
+  % in case of starting/restarting, wait only half of the usual refresh
+  % interval, otherwise it could grow up to almost twice the refresh, and that
+  % would be a little too much
+  LastUpdateExpected = Timestamp - RefreshInterval div 2,
+  case dets:lookup(Table, updated) of
+    [] ->
+      refresh();
+    [{updated, LastUpdate, _}] when LastUpdate < LastUpdateExpected ->
+      refresh();
+    [{updated, LastUpdate, _}] when LastUpdate >= LastUpdateExpected ->
+      ok
+  end,
   {ok, State}.
 
 %% @private
 %% @doc Clean up after event handler.
 
-terminate(_Arg, _State) ->
+terminate(_Arg, _State = #state{table = Table}) ->
+  dets:close(Table),
   ok.
 
 %% }}}
@@ -98,6 +122,14 @@ terminate(_Arg, _State) ->
 
 %% @private
 %% @doc Handle {@link gen_server:call/2}.
+
+handle_call({resolve, Hostname} = _Request, _From,
+            State = #state{table = Table}) ->
+  Result = case dets:lookup(Table, {host, Hostname}) of
+    [{{host, Hostname}, Entry}] -> Entry;
+    [] -> none
+  end,
+  {reply, Result, State};
 
 %% unknown calls
 handle_call(_Request, _From, State) ->
@@ -112,6 +144,21 @@ handle_cast(_Request, State) ->
 
 %% @private
 %% @doc Handle incoming messages.
+
+handle_info({fill, Entries, ExitCode} = _Message,
+            State = #state{table = Table}) ->
+  {MS,S,_US} = os:timestamp(),
+  Timestamp = MS * 1000 * 1000 + S,
+  % delete all host entries, then re-insert back those that came in this
+  % message
+  dets:select_delete(Table, ets:fun2ms(fun({{host,_},_}) -> true end)),
+  dets:insert(Table, [
+    {{host, Hostname}, Entry} ||
+    {Hostname, _Port, _Addr, _Creds} = Entry <- Entries
+  ]),
+  % mark when the last (this) update was performed and some info about it
+  dets:insert(Table, {updated, Timestamp, [{exit_code, ExitCode}]}),
+  {noreply, State};
 
 %% unknown messages
 handle_info(_Message, State) ->

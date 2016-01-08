@@ -34,10 +34,11 @@ start_link() ->
 init([] = _Args) ->
   Strategy = {one_for_one, 5, 10},
   Children = [
-    {korrpcdid_hostdb, {korrpcdid_hostdb, start_link, []},
-      permanent, 1000, worker, [korrpcdid_hostdb]},
     {korrpcdid_hostdb_refresh, {korrpcdid_hostdb_refresh, start_link, []},
-      permanent, 1000, worker, [korrpcdid_hostdb_refresh]}
+      permanent, 1000, worker, [korrpcdid_hostdb_refresh]},
+    % XXX: korrpcdid_hostdb needs korrpcdid_hostdb_refresh already running
+    {korrpcdid_hostdb, {korrpcdid_hostdb, start_link, []},
+      permanent, 1000, worker, [korrpcdid_hostdb]}
   ],
   {ok, {Strategy, Children}}.
 

@@ -131,10 +131,12 @@ handle_info({Port, {data, {eol, Line}} = _Data} = _Message,
   NewState = State#state{result = NewResult},
   {noreply, NewState};
 
-handle_info({Port, {exit_status, _ExitStatus}} = _Message,
-            State = #state{port = Port, result = _Result}) when is_port(Port) ->
+handle_info({Port, {exit_status, ExitStatus}} = _Message,
+            State = #state{port = Port, result = Result}) when is_port(Port) ->
   %port_close(Port), % don't call this one on exit_status
-  % TODO: consume the exit status and send an aggregate message
+  % send the update
+  Entries = dict:fold(fun(_Name, Entry, Acc) -> [Entry | Acc] end, [], Result),
+  korrpcdid_hostdb ! {fill, Entries, ExitStatus},
   NewState = State#state{
     port = undefined,
     result = dict:new()
