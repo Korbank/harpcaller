@@ -8,6 +8,7 @@
 
 -export([format/1]).
 -export([uuid/0, uuid3/2, uuid4/0, uuid5/2]).
+-export([version/1]).
 
 %%%----------------------------------------------------------------------------
 
@@ -45,6 +46,25 @@ strhex(Binary) ->
 
 hex(D) when  0 =< D, D =< 9 -> $0 + D;
 hex(D) when 10 =< D         -> $a + D - 10.
+
+-spec version(string() | binary()) ->
+  1 .. 5 | false.
+
+version(UUID) when is_list(UUID) ->
+  case re:run(UUID, "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$", [dollar_endonly]) of
+    {match, _} ->
+      [VDigit] = string:substr(UUID, 15, 1),
+      VDigit - $0;
+    nomatch ->
+      false
+  end;
+
+version(<<_:6/binary, Version:4/integer, _:76/bitstring>> = _UUID)
+when Version >= 1, Version =< 5 ->
+  Version;
+version(UUID) when is_binary(UUID) ->
+  false.
+
 
 %%%----------------------------------------------------------------------------
 

@@ -8,7 +8,7 @@
 
 %% public interface
 -export([start/0]).
--export([generate_job_id/0]).
+-export([generate_job_id/0, valid_job_id/1]).
 
 -export_type([job_id/0, hostname/0, address/0]).
 
@@ -41,6 +41,19 @@ start() ->
 
 generate_job_id() ->
   korrpc_uuid:format(korrpc_uuid:uuid()).
+
+%% @doc Check job ID for being valid.
+
+-spec valid_job_id(string() | binary()) ->
+  boolean().
+
+valid_job_id(JobID) when is_binary(JobID) ->
+  valid_job_id(binary_to_list(JobID));
+valid_job_id(JobID) when is_list(JobID) ->
+  case korrpc_uuid:version(JobID) of
+    Version when is_integer(Version) -> true;
+    false -> false
+  end.
 
 %%%---------------------------------------------------------------------------
 %%% helpers
