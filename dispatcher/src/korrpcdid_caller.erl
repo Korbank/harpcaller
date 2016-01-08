@@ -328,7 +328,6 @@ handle_info({go, QRef} = _Message,
                            stream_table = StreamTable}) ->
   case start_request(State) of
     {ok, Handle} ->
-      % TODO: denote dequeueing in `StreamTable'
       Now = now(),
       NewState = State#state{
         call = Handle,
@@ -453,12 +452,17 @@ send_message({Pid, _Ref} = _Entry, Message) ->
 -spec start_request(#state{}) ->
   {ok, korrpc:handle()} | {error, term()}.
 
-start_request(_State = #state{request = {Procedure, ProcArgs, Host},
+start_request(_State = #state{request = {Procedure, ProcArgs, Hostname},
                               stream_table = StreamTable}) ->
-  korrpc_sdb:started(StreamTable),
-  % TODO: use `korrpcdid_hostdb:resolve(Host)'
-  RequestOpts = [{host, binary_to_list(Host)}, {port, ?KORRPC_PORT}],
-  korrpc:request(Procedure, ProcArgs, RequestOpts).
+  case korrpcdid_hostdb:resolve(Hostname) of
+    {Hostname, Address, Port, _Credentials} ->
+      korrpc_sdb:started(StreamTable),
+      % TODO: use `Credentials'
+      RequestOpts = [{host, Address}, {port, Port}],
+      korrpc:request(Procedure, ProcArgs, RequestOpts);
+    none ->
+      {error, unknown_host}
+  end.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

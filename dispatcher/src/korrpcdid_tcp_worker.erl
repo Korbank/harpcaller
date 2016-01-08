@@ -131,9 +131,8 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
         undefined -> [];
         {QueueName, Concurrency} -> [{'queue', {QueueName, Concurrency}}]
       end,
-      % TODO: allow non-default port to be used
-      {ok, _Pid, JobID} = korrpcdid_caller:call(Proc, Args, Host,
-                                                QueueOpts ++ Options),
+      {ok, _Pid, JobID} =
+        korrpcdid_caller:call(Proc, Args, Host, QueueOpts ++ Options),
       send_response(Socket, [
         {<<"korrpcdid">>, 1},
         {<<"job_id">>, list_to_binary(JobID)}
