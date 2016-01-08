@@ -250,7 +250,8 @@ format_result(still_running = _Result) ->
 format_result(cancelled = _Result) ->
   [{<<"cancelled">>, true}];
 format_result(missing = _Result) ->
-  'TODO';
+  format_result({error, {<<"missing_result">>,
+                          <<"job interrupted abruptly">>}});
 format_result({exception, {Type, Message}} = _Result) ->
   [{<<"exception">>,
     [{<<"type">>, Type}, {<<"message">>, Message}]}];
@@ -265,12 +266,21 @@ format_result({error, {Type, Message, Data}} = _Result)
 when is_binary(Type), is_binary(Message) ->
   [{<<"error">>,
     [{<<"type">>, Type}, {<<"message">>, Message}, {<<"data">>, Data}]}];
-format_result({error, _Reason} = _Result) ->
-  'TODO';
+format_result({error, Reason} = _Result) when is_atom(Reason) ->
+  [{<<"error">>, [
+    {<<"type">>, atom_to_binary(Reason, utf8)},
+    {<<"message">>, inet:format_error(Reason)}
+  ]}];
+format_result({error, Reason} = _Result) ->
+  [{<<"error">>, [
+    {<<"type">>, <<"unrecognized">>},
+    % hopefully 1024 chars will be enough; if not, pity, it's still serialized
+    % to JSON
+    {<<"message">>, iolist_to_binary(iolib:format("~1024p", [Reason]))}
+  ]}];
 format_result(undefined = _Result) ->
   % no such job
-  % TODO: return an appropriate message
-  'TODO'.
+  format_result({error, {<<"invalid_jobid">>, <<"no job with this ID">>}}).
 
 %%----------------------------------------------------------
 
