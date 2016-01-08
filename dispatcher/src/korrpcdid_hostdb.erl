@@ -33,8 +33,8 @@
 
 -type host_entry() :: {
   Name :: korrpcdid:hostname(),
-  Port :: inet:port_number(),
   Address :: korrpcdid:address(),
+  Port :: inet:port_number(),
   Credentials :: term()
 }.
 
@@ -154,7 +154,7 @@ handle_info({fill, Entries, ExitCode} = _Message,
   dets:select_delete(Table, ets:fun2ms(fun({{host,_},_}) -> true end)),
   dets:insert(Table, [
     {{host, Hostname}, Entry} ||
-    {Hostname, _Port, _Addr, _Creds} = Entry <- Entries
+    {Hostname, _Addr, _Port, _Creds} = Entry <- Entries
   ]),
   % mark when the last (this) update was performed and some info about it
   dets:insert(Table, {updated, Timestamp, [{exit_code, ExitCode}]}),

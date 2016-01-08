@@ -125,7 +125,7 @@ handle_info({Port, {data, {eol, Line}} = _Data} = _Message,
   % XXX: this construct ignores lines that are too long (> ?MAX_LINE) and
   % a single line at EOF that wasn't terminated with EOL (if any)
   NewResult = case decode_host_entry(Line) of
-    {Name, _PortNum, _Addr, _Creds} = Entry -> dict:store(Name, Entry, Result);
+    {Name, _Addr, _PortNum, _Creds} = Entry -> dict:store(Name, Entry, Result);
     ignore -> Result
   end,
   NewState = State#state{result = NewResult},
@@ -190,14 +190,15 @@ decode_host_entry(String) ->
   try
     {ok, Data} = korrpc_json:decode(String),
     Name = orddict:fetch(<<"hostname">>, Data),
+    % TODO: detect IPv4/IPv6 addresses
+    Address = binary_to_list(orddict:fetch(<<"address">>, Data)),
     Port = orddict:fetch(<<"port">>, Data),
-    Address = orddict:fetch(<<"address">>, Data),
     Credentials = orddict:fetch(<<"credentials">>, Data),
-    {Name, Port, Address, Credentials}
+    {Name, Address, Port, Credentials}
   catch
     error:_ ->
       % not a valid JSON, not a JSON hash, or one of the mandatory fields is
-      % missing
+      % missing or invalid
       ignore
   end.
 
