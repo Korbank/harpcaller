@@ -4,6 +4,12 @@
   {registered, [
     korrpcdid_sup,
     korrpc_sdb_sup,
+    korrpcdid_call_sup,
+    korrpcdid_caller_sup,
+    korrpcdid_call_queue,
+    korrpcdid_hostdb_sup,
+    korrpcdid_hostdb,
+    korrpcdid_hostdb_refresh_sup,
     korrpcdid_tcp_sup,
     korrpcdid_tcp_worker_sup
   ]},
