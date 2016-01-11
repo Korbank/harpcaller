@@ -9,6 +9,7 @@ blockdiag {
   korrpcdid_sup -> korrpcdid_call_sup;
   korrpcdid_sup -> korrpc_sdb_sup;
   korrpcdid_sup -> korrpcdid_hostdb_sup;
+  korrpcdid_sup -> korrpcdid_log;
   korrpcdid_tcp_sup -> korrpcdid_tcp_listener;
   korrpcdid_tcp_sup -> korrpcdid_tcp_worker_sup;
   korrpcdid_tcp_worker_sup -> korrpcdid_tcp_worker;
