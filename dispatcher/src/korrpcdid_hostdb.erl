@@ -145,8 +145,7 @@ handle_cast(_Request, State) ->
 %% @private
 %% @doc Handle incoming messages.
 
-handle_info({fill, Entries, ExitCode} = _Message,
-            State = #state{table = Table}) ->
+handle_info({fill, Entries} = _Message, State = #state{table = Table}) ->
   {MS,S,_US} = os:timestamp(),
   Timestamp = MS * 1000 * 1000 + S,
   % delete all host entries, then re-insert back those that came in this
@@ -157,7 +156,7 @@ handle_info({fill, Entries, ExitCode} = _Message,
     {Hostname, _Addr, _Port, _Creds} = Entry <- Entries
   ]),
   % mark when the last (this) update was performed and some info about it
-  dets:insert(Table, {updated, Timestamp, [{exit_code, ExitCode}]}),
+  dets:insert(Table, {updated, Timestamp, []}),
   {noreply, State};
 
 %% unknown messages

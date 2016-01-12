@@ -24,6 +24,7 @@
 %%%---------------------------------------------------------------------------
 
 -define(MAX_LINE, 4096).
+-define(LOG_CAT, hostdb_refresh).
 
 -record(state, {
   command :: string(),
@@ -134,9 +135,20 @@ handle_info({Port, {data, {eol, Line}} = _Data} = _Message,
 handle_info({Port, {exit_status, ExitStatus}} = _Message,
             State = #state{port = Port, result = Result}) when is_port(Port) ->
   %port_close(Port), % don't call this one on exit_status
-  % send the update
-  Entries = dict:fold(fun(_Name, Entry, Acc) -> [Entry | Acc] end, [], Result),
-  korrpcdid_hostdb ! {fill, Entries, ExitStatus},
+  case ExitStatus of
+    0 ->
+      % send the update
+      Entries = dict:fold(
+        fun(_Name, Entry, Acc) -> [Entry | Acc] end,
+        [],
+        Result
+      ),
+      korrpcdid_hostdb ! {fill, Entries};
+    _ ->
+      % only use successful runs, otherwise the script could have died of some
+      % unexpected reason and it would clear the known hosts registry
+      ignore
+  end,
   NewState = State#state{
     port = undefined,
     result = dict:new()
