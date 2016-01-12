@@ -21,7 +21,7 @@
 
 %%%---------------------------------------------------------------------------
 
--type event_info() :: [{atom(), korrpc_json:jhash()}].
+-type event_info() :: [{atom(), korrpc_json:jhash() | {term, term()} | {str, string()}}].
 
 -type event_type() :: atom().
 

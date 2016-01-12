@@ -109,6 +109,7 @@ handle_call(_Request, _From, State) ->
 %% @doc Handle {@link gen_server:cast/2}.
 
 handle_cast(refresh_now = _Request, State) ->
+  korrpcdid_log:info(?LOG_CAT, "refresh request outside the schedule", []),
   % execute the command or no-op if a command is already running
   Port = execute(State),
   NewState = State#state{port = Port},
@@ -138,6 +139,8 @@ handle_info({Port, {exit_status, ExitStatus}} = _Message,
   case ExitStatus of
     0 ->
       % send the update
+      korrpcdid_log:info(?LOG_CAT, "refresh script terminated",
+                         [{exit_code, ExitStatus}]),
       Entries = dict:fold(
         fun(_Name, Entry, Acc) -> [Entry | Acc] end,
         [],
@@ -147,6 +150,8 @@ handle_info({Port, {exit_status, ExitStatus}} = _Message,
     _ ->
       % only use successful runs, otherwise the script could have died of some
       % unexpected reason and it would clear the known hosts registry
+      korrpcdid_log:warn(?LOG_CAT, "refresh script terminated abnormally",
+                         [{exit_code, ExitStatus}]),
       ignore
   end,
   NewState = State#state{
@@ -157,6 +162,8 @@ handle_info({Port, {exit_status, ExitStatus}} = _Message,
 
 handle_info(refresh = _Message, State = #state{interval = RefreshInterval}) ->
   % schedule the next refresh
+  korrpcdid_log:info(?LOG_CAT, "refreshing on schedule",
+                     [{schedule, RefreshInterval}]),
   erlang:send_after(RefreshInterval * 1000, self(), refresh),
   % execute the command or no-op if a command is already running
   Port = execute(State),
@@ -189,8 +196,11 @@ code_change(_OldVsn, State, _Extra) ->
   port().
 
 execute(_State = #state{port = undefined, command = Command}) ->
+  korrpcdid_log:info(?LOG_CAT, "starting refresh script",
+                     [{command, {str, Command}}]),
   open_port({spawn_executable, Command}, [{line, ?MAX_LINE}, in, exit_status]);
 execute(_State = #state{port = Port}) when is_port(Port) ->
+  korrpcdid_log:info(?LOG_CAT, "refresh script is already running", []),
   Port.
 
 %% @doc Decode a JSON line to host entry

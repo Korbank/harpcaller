@@ -25,6 +25,8 @@
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
+-define(LOG_CAT, call_queue).
+
 -type queue_name() :: term().
 
 -record(state, {
@@ -147,18 +149,29 @@ handle_call({enqueue, Pid, QueueName, Concurrency} = _Request, _From, State) ->
   MonRef = remember_process(Pid, QRef, QueueName, State),
   Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
   % create a queue if it doesn't exist already
-  create_queue(QueueName, Concurrency, State),
+  case create_queue(QueueName, Concurrency, State) of
+    true -> korrpcdid_log:info(?LOG_CAT, "queue created",
+                               [{name, QueueName}, {max_running, Concurrency}]);
+    false -> ok
+  end,
   case queue_status(QueueName, State) of
     #qopts{running = N, concurrency = C} when N < C ->
       % queue with spare room to run a task
+      korrpcdid_log:info(?LOG_CAT, "queue has spare room, starting job",
+                         [{pid, {term, Pid}}, {name, QueueName},
+                          {running, N}, {max_running, C}]),
       make_running(Entry, QueueName, State);
     #qopts{running = N, concurrency = C} when N >= C ->
       % queue full of running tasks
+      korrpcdid_log:info(?LOG_CAT, "queue maxed out, holding job",
+                         [{pid, {term, Pid}}, {name, QueueName},
+                          {max_running, C}]),
       add_queued(Entry, QueueName, State)
   end,
   {reply, QRef, State};
 
 handle_call({cancel, QueueName} = _Request, _From, State) ->
+  korrpcdid_log:info(?LOG_CAT, "cancelling queue", [{name, QueueName}]),
   [Pid ! {cancel, QRef} ||
     #qentry{pid = Pid, qref = QRef} <- list_queued(QueueName, State)],
   [Pid ! {cancel, QRef} ||
@@ -192,18 +205,27 @@ handle_info({'DOWN', MonRef, process, Pid, _Info} = _Message, State) ->
       case {QueuedTasks, RunningCount} of
         {[], _} when RunningCount > 0 ->
           % nothing left in queue, but there's still some processes running
+          korrpcdid_log:info(?LOG_CAT, "running job stopped, nothing to run left",
+                             [{pid, {term, Pid}}, {name, QueueName}]),
           ok;
         {[], 0} ->
           % nothing left in queue and this was the last running process
+          korrpcdid_log:info(?LOG_CAT, "last running job stopped, queue empty",
+                             [{pid, {term, Pid}}, {name, QueueName}]),
           delete_queue(QueueName, State);
-        {[NextEntry | _], _} ->
+        {[NextEntry = #qentry{pid = NextPid} | _], _} ->
           % still something in the queue; make it running
+          korrpcdid_log:info(?LOG_CAT, "running job stopped, starting another",
+                             [{pid, {term, Pid}}, {next_pid, {term, NextPid}},
+                              {name, QueueName}]),
           make_running(NextEntry, QueueName, State)
       end;
     {QRef, QueueName, queued} ->
       % NOTE: if this one is queued, it means the queue was full, so don't
       % delete it (the queue) just yet
       Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
+      korrpcdid_log:info(?LOG_CAT, "waiting job stopped",
+                         [{pid, {term, Pid}}, {name, QueueName}]),
       delete_queued(Entry, QueueName, State),
       ok
   end,

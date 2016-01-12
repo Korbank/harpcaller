@@ -27,6 +27,8 @@
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
+-define(LOG_CAT, hostdb).
+
 -record(state, {
   table :: dets:tab_name()
 }).
@@ -146,6 +148,8 @@ handle_cast(_Request, State) ->
 %% @doc Handle incoming messages.
 
 handle_info({fill, Entries} = _Message, State = #state{table = Table}) ->
+  korrpcdid_log:info(?LOG_CAT, "known hosts registry refreshed",
+                     [{entries, length(Entries)}]),
   {MS,S,_US} = os:timestamp(),
   Timestamp = MS * 1000 * 1000 + S,
   % delete all host entries, then re-insert back those that came in this

@@ -21,6 +21,8 @@
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
+-define(LOG_CAT, connection).
+
 -record(state, {
   client :: gen_tcp:socket(),
   job_id :: korrpcdid:job_id(),
@@ -109,21 +111,35 @@ handle_info({record, JobID, Id, Record} = _Message,
   end;
 
 handle_info({terminated, JobID, Result} = _Message,
-            State = #state{job_id = JobID}) ->
+            State = #state{job_id = JobID, client = Client}) ->
   % got our result; send it to the client
-  send_response(State, format_result(Result)),
+  FormattedResult = format_result(Result),
+  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
+  korrpcdid_log:info(?LOG_CAT, "job terminated",
+                     [{client, {term, Peer}}, {job, {str, JobID}},
+                      {result, FormattedResult}, {wait, true}]),
+  send_response(State, FormattedResult),
   {stop, normal, State};
 
-handle_info(timeout = _Message, State = #state{job_id = JobID}) ->
+handle_info(timeout = _Message,
+            State = #state{job_id = JobID, client = Client}) ->
+  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
   case State of
     #state{mode = follow, recent = 0} ->
       % special case when there's no need to read the history of stream
       case korrpcdid_caller:follow_stream(JobID) of
         ok ->
+          korrpcdid_log:info(?LOG_CAT, "job still running, reading the stream result",
+                             [{client, {term, Peer}}, {job, {str, JobID}},
+                              {wait, true}]),
           {noreply, State};
         undefined ->
           Result = korrpcdid_caller:get_result(JobID),
-          send_response(State, format_result(Result)),
+          FormattedResult = format_result(Result),
+          korrpcdid_log:info(?LOG_CAT, "job is already finished, returning result",
+                             [{client, {term, Peer}}, {job, {str, JobID}},
+                              {result, FormattedResult}, {wait, true}]),
+          send_response(State, FormattedResult),
           {stop, normal, State}
       end;
     #state{mode = follow} ->
@@ -134,21 +150,36 @@ handle_info(timeout = _Message, State = #state{job_id = JobID}) ->
             ok ->
               % TODO: if this operation specified an ID in the future, skip
               % those as well (probably in `handle_info({record, ...})')
+              korrpcdid_log:info(?LOG_CAT, "job still running, reading the stream result",
+                                 [{client, {term, Peer}},
+                                  {job, {str, JobID}}, {wait, true}]),
               flush_stream(JobID, NextId),
               {noreply, State};
             undefined ->
               Result = korrpcdid_caller:get_result(JobID),
-              send_response(State, format_result(Result)),
+              FormattedResult = format_result(Result),
+              korrpcdid_log:info(?LOG_CAT, "job is already finished, returning result",
+                                 [{client, {term, Peer}}, {job, {str, JobID}},
+                                  {result, FormattedResult}, {wait, true}]),
+              send_response(State, FormattedResult),
               {stop, normal, State}
           end;
         {error, Reason} ->
-          send_response(State, format_result({error, Reason})),
+          FormattedResult = format_result({error, Reason}),
+          korrpcdid_log:warn(?LOG_CAT, "reading job's recorded data failed",
+                             [{client, {term, Peer}}, {job, {str, JobID}},
+                              {reason, {term, Reason}}]),
+          send_response(State, FormattedResult),
           {stop, Reason, State}
       end;
     #state{mode = read} ->
       read_stream(State), % don't care if successful or not
       Result = korrpcdid_caller:get_result(JobID),
-      send_response(State, format_result(Result)),
+      FormattedResult = format_result(Result),
+      korrpcdid_log:info(?LOG_CAT, "returning job's result",
+                         [{client, {term, Peer}}, {job, {str, JobID}},
+                          {result, FormattedResult}, {wait, false}]),
+      send_response(State, FormattedResult),
       {stop, normal, State}
   end;
 

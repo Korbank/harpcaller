@@ -21,6 +21,8 @@
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
+-define(LOG_CAT, connection).
+
 -record(state, {
   client :: gen_tcp:socket(),
   job_id :: korrpcdid:job_id(),
@@ -93,25 +95,46 @@ handle_info({record, JobID, _Id, _Record} = _Message,
   {noreply, State};
 
 handle_info({terminated, JobID, Result} = _Message,
-            State = #state{job_id = JobID}) ->
+            State = #state{job_id = JobID, client = Client}) ->
   % got our result; send it to the client
-  send_response(State, format_result(Result)),
+  FormattedResult = format_result(Result),
+  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
+  korrpcdid_log:info(?LOG_CAT, "job terminated",
+                     [{client, {term, Peer}}, {job, {str, JobID}},
+                      {result, FormattedResult}, {wait, true}]),
+  send_response(State, FormattedResult),
   {stop, normal, State};
 
-handle_info(timeout = _Message, State = #state{job_id = JobID, wait = false}) ->
+handle_info(timeout = _Message,
+            State = #state{job_id = JobID, client = Client, wait = false}) ->
   Value = korrpcdid_caller:get_result(JobID),
-  send_response(State, format_result(Value)),
+  FormattedResult = format_result(Value),
+  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
+  korrpcdid_log:info(?LOG_CAT, "returning job's result",
+                     [{client, {term, Peer}}, {job, {str, JobID}},
+                      {result, FormattedResult}, {wait, false}]),
+  send_response(State, FormattedResult),
   {stop, normal, State};
 
-handle_info(timeout = _Message, State = #state{job_id = JobID, wait = true}) ->
+handle_info(timeout = _Message,
+            State = #state{job_id = JobID, client = Client, wait = true}) ->
+  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
   case korrpcdid_caller:follow_stream(JobID) of
     ok ->
       % consume+ignore all the stream, waiting for the result
+      korrpcdid_log:info(?LOG_CAT, "job still running, waiting for the result",
+                         [{client, {term, Peer}}, {job, {str, JobID}},
+                          {wait, true}]),
       {noreply, State};
     undefined ->
       % no process to follow, so it must terminated already
       Value = korrpcdid_caller:get_result(JobID),
-      send_response(State, format_result(Value)),
+      FormattedResult = format_result(Value),
+      {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
+      korrpcdid_log:info(?LOG_CAT, "returning job's result",
+                         [{client, {term, Peer}}, {job, {str, JobID}},
+                          {result, FormattedResult}, {wait, false}]),
+      send_response(State, FormattedResult),
       {stop, normal, State}
   end;
 

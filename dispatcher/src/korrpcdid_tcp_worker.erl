@@ -23,6 +23,8 @@
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
+-define(LOG_CAT, connection).
+
 -define(TCP_READ_INTERVAL, 100).
 
 -record(state, {socket}).
@@ -114,9 +116,16 @@ handle_cast(_Request, State) ->
 %% @doc Handle incoming messages.
 
 handle_info(timeout = _Message, State = #state{socket = Socket}) ->
+  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Socket),
   case read_request(Socket, ?TCP_READ_INTERVAL) of
     {call, Proc, Args, Host, Timeout, MaxExecTime, Queue} -> % long running
       put('$worker_function', call),
+      korrpcdid_log:info(?LOG_CAT, "call request",
+                         [{client, {term, Peer}},
+                          {host, Host},
+                          {procedure, Proc}, {procedure_arguments, Args},
+                          {timeout, Timeout}, {max_exec_time, MaxExecTime},
+                          {queue, {term, Queue}}]),
       Options = case {Timeout, MaxExecTime} of
         {undefined, undefined} ->
           [];
@@ -140,6 +149,8 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       {stop, normal, State};
     {cancel, JobID} -> % immediate
       put('$worker_function', cancel),
+      korrpcdid_log:info(?LOG_CAT, "cancel job",
+                         [{client, {term, Peer}}, {job, {str, JobID}}]),
       case korrpcdid_caller:cancel(JobID) of
         ok        -> send_response(Socket, [{<<"cancelled">>, true}]);
         undefined -> send_response(Socket, [{<<"cancelled">>, false}])
@@ -151,18 +162,25 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
         wait -> true;
         no_wait -> false
       end,
+      korrpcdid_log:info(?LOG_CAT, "get job's result",
+                         [{client, {term, Peer}}, {job, {str, JobID}},
+                          {wait, Wait}]),
       NewState = korrpcdid_tcp_return_result:state(Socket, JobID, Wait),
       % this does not return to this code
       gen_server:enter_loop(korrpcdid_tcp_return_result, [], NewState, 0);
     {follow_stream, JobID, Mode, ModeArg} -> % long running
       % `Mode :: recent | since'
       put('$worker_function', follow_stream),
+      korrpcdid_log:info(?LOG_CAT, "follow job's streamed result",
+                         [{client, {term, Peer}}, {job, {str, JobID}}]),
       NewState = korrpcdid_tcp_return_stream:state(Socket, JobID, follow, {Mode, ModeArg}),
       % this does not return to this code
       gen_server:enter_loop(korrpcdid_tcp_return_stream, [], NewState, 0);
     {read_stream, JobID, Mode, ModeArg} -> % immediate
       % `Mode :: recent | since'
       put('$worker_function', read_stream),
+      korrpcdid_log:info(?LOG_CAT, "follow job's streamed result",
+                         [{client, {term, Peer}}, {job, {str, JobID}}]),
       NewState = korrpcdid_tcp_return_stream:state(Socket, JobID, read, {Mode, ModeArg}),
       % this does not return to this code
       gen_server:enter_loop(korrpcdid_tcp_return_stream, [], NewState, 0);
@@ -170,6 +188,8 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       % yield for next system message if any awaits our attention
       {noreply, State, 0};
     {error, Reason} ->
+      korrpcdid_log:warn(?LOG_CAT, "request reading error",
+                         [{client, {term, Peer}}, {reason, {term, Reason}}]),
       {stop, Reason, State}
   end;
 

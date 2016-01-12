@@ -27,6 +27,8 @@
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
+-define(LOG_CAT, caller).
+
 %% I should probably keep `max_exec_time' and `timeout' as microseconds to
 %% avoid multiplication and division, but `timeout()' type is usually
 %% milliseconds (e.g. in `receive .. end'), so let's leave it this way
@@ -238,6 +240,8 @@ terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
 handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
             State = #state{job_id = JobID, call = undefined}) ->
   {Timeout, MaxExecTime, Queue} = decode_options(Options),
+  korrpcdid_log:info(?LOG_CAT, "starting a new call",
+                     [{job, {str, JobID}}]),
   case korrpc_sdb:new(JobID, Procedure, ProcArgs, Host) of
     {ok, StreamTable} ->
       FilledState = State#state{
@@ -249,6 +253,8 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
       case Queue of
         undefined ->
           % execute immediately
+          korrpcdid_log:info(?LOG_CAT, "starting immediately",
+                             [{job, {str, JobID}}]),
           case start_request(FilledState) of
             {ok, Handle} ->
               Now = now(),
@@ -259,6 +265,9 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
               },
               {reply, {ok, JobID}, NewState, 0};
             {error, Reason} ->
+              korrpcdid_log:warn(?LOG_CAT, "call failed",
+                                 [{job, {str, JobID}},
+                                  {reason, {term, Reason}}]),
               korrpc_sdb:set_result(StreamTable, {error, Reason}),
               % request itself failed, but the job was carried successfully;
               % tell the parent that that part got done
@@ -266,6 +275,8 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
           end;
         {QueueName, Concurrency} ->
           % enqueue and wait for a message
+          korrpcdid_log:info(?LOG_CAT, "waiting for a queue",
+                             [{job, {str, JobID}}, {'queue', QueueName}]),
           QRef = korrpcdid_call_queue:enqueue(QueueName, Concurrency),
           NewState = FilledState#state{
             call = {queued, QRef}
@@ -273,6 +284,8 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
           {reply, {ok, JobID}, NewState}
       end;
     {error, Reason} ->
+      korrpcdid_log:err(?LOG_CAT, "opening stream storage failed",
+                        [{job, {str, JobID}}, {error, {term, Reason}}]),
       % operational and (mostly) unexpected error; signal crashing
       StopReason = {open, Reason},
       {stop, StopReason, {error, StopReason}, State}
@@ -293,6 +306,7 @@ handle_call(get_sdb = _Request, _From,
 
 handle_call(cancel = _Request, _From,
             State = #state{stream_table = StreamTable, job_id = JobID}) ->
+  korrpcdid_log:info(?LOG_CAT, "got a cancel order", [{job, {str, JobID}}]),
   notify_followers(State, {terminated, JobID, cancelled}),
   korrpc_sdb:set_result(StreamTable, cancelled),
   {stop, normal, ok, State};
@@ -319,13 +333,15 @@ handle_info({'DOWN', Ref, process, Pid, _Reason} = _Message,
 handle_info({cancel, _QRef} = _Message,
             State = #state{stream_table = StreamTable, job_id = JobID}) ->
   % NOTE: the same as `cancel()' call, except it's a message
+  korrpcdid_log:info(?LOG_CAT, "got a cancel order", [{job, {str, JobID}}]),
   notify_followers(State, {terminated, JobID, cancelled}),
   korrpc_sdb:set_result(StreamTable, cancelled),
   {stop, normal, State};
 
 handle_info({go, QRef} = _Message,
-            State = #state{call = {queued, QRef},
+            State = #state{call = {queued, QRef}, job_id = JobID,
                            stream_table = StreamTable}) ->
+  korrpcdid_log:info(?LOG_CAT, "job dequeued", [{job, {str, JobID}}]),
   case start_request(State) of
     {ok, Handle} ->
       Now = now(),
@@ -336,6 +352,8 @@ handle_info({go, QRef} = _Message,
       },
       {noreply, NewState, 0};
     {error, Reason} ->
+      korrpcdid_log:warn(?LOG_CAT, "call failed",
+                         [{job, {str, JobID}}, {reason, {term, Reason}}]),
       korrpc_sdb:set_result(StreamTable, {error, Reason}),
       % request itself failed, but the job was carried successfully;
       % tell the parent that that part got done
@@ -361,11 +379,14 @@ handle_info(timeout = _Message,
         #state{timeout = Timeout} when ReadTime >= Timeout ->
           TimeoutDesc = {<<"timeout">>, <<"reading result timed out">>},
           notify_followers(State, {terminated, JobID, {error, TimeoutDesc}}),
+          korrpcdid_log:warn(?LOG_CAT, "read timeout", [{job, {str, JobID}}]),
           ok = korrpc_sdb:set_result(StreamTable, {error, TimeoutDesc}),
           {stop, normal, State};
         #state{max_exec_time = MaxExecTime} when RunTime >= MaxExecTime ->
           TimeoutDesc = {<<"timeout">>, <<"maximum execution time exceeded">>},
           notify_followers(State, {terminated, JobID, {error, TimeoutDesc}}),
+          korrpcdid_log:warn(?LOG_CAT, "total execution time exceeded",
+                             [{job, {str, JobID}}]),
           ok = korrpc_sdb:set_result(StreamTable, {error, TimeoutDesc}),
           {stop, normal, State};
         _ ->
@@ -378,14 +399,20 @@ handle_info(timeout = _Message,
       {noreply, NewState, 0};
     {result, Result} ->
       notify_followers(State, {terminated, JobID, {return, Result}}),
+      korrpcdid_log:info(?LOG_CAT, "job finished",
+                         [{job, {str, JobID}}, {reason, return}]),
       ok = korrpc_sdb:set_result(StreamTable, {return, Result}),
       {stop, normal, State};
     {exception, Exception} ->
       notify_followers(State, {terminated, JobID, {exception, Exception}}),
+      korrpcdid_log:info(?LOG_CAT, "job finished",
+                         [{job, {str, JobID}}, {reason, exception}]),
       ok = korrpc_sdb:set_result(StreamTable, {exception, Exception}),
       {stop, normal, State};
     {error, Reason} ->
       notify_followers(State, {terminated, JobID, {error, Reason}}),
+      korrpcdid_log:warn(?LOG_CAT, "job finished abnormally",
+                         [{job, {str, JobID}}, {reason, {term, Reason}}]),
       ok = korrpc_sdb:set_result(StreamTable, {error, Reason}),
       {stop, normal, State}
   end;

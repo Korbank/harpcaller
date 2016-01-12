@@ -19,6 +19,8 @@
 %%%---------------------------------------------------------------------------
 %%% {{{
 
+-define(LOG_CAT, connection).
+
 -define(ACCEPT_INTERVAL, 100).
 
 -record(state, {socket}).
@@ -53,6 +55,8 @@ start_link({Addr, Port} = _ListenSpec) ->
 init([Addr, Port] = _Args) ->
   case tcp_bind_addr_opts(Addr) of
     {ok, Opts} ->
+      korrpcdid_log:info(?LOG_CAT, "listening on TCP socket",
+                         [{address, {term, Addr}}, {port, Port}]),
       case gen_tcp:listen(Port, [{active, false}, {packet, line}, binary,
                                   {reuseaddr, true} | Opts]) of
         {ok, Socket} ->
@@ -62,6 +66,9 @@ init([Addr, Port] = _Args) ->
           {stop, Reason}
       end;
     {error, Reason} ->
+      korrpcdid_log:err(?LOG_CAT, "TCP listen error",
+                        [{address, {term, Addr}}, {port, Port},
+                         {reason, {term, Reason}}]),
       {stop, Reason}
   end.
 
@@ -96,6 +103,11 @@ handle_cast(_Request, State) ->
 handle_info(timeout = _Message, State = #state{socket = Socket}) ->
   case gen_tcp:accept(Socket, ?ACCEPT_INTERVAL) of
     {ok, Client} ->
+      % when could a valid socket render an error?
+      {ok, {PeerAddr, PeerPort}} = inet:peername(Client),
+      korrpcdid_log:info(?LOG_CAT, "new connection",
+                         [{client_address, {term, PeerAddr}},
+                          {client_port, PeerPort}]),
       {ok, Pid} = korrpcdid_tcp_worker_sup:spawn_worker(Client),
       case gen_tcp:controlling_process(Client, Pid) of
         ok -> ok;
@@ -105,6 +117,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
     {error, timeout} ->
       {noreply, State, 0};
     {error, Reason} ->
+      korrpcdid_log:err(?LOG_CAT, "accept error", [{reason, {term, Reason}}]),
       {stop, Reason}
   end;
 
