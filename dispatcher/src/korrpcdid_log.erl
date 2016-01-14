@@ -2,7 +2,9 @@
 %%% @doc
 %%%   Event log collector process and logging functions.
 %%%
-%%%   Process conforms to {@link gen_event} interface.
+%%%   Process conforms to {@link gen_event} interface and loads all the event
+%%%   handlers defined in `korrpcdid' application's environment `log_handlers'
+%%%   (a list of tuples {@type @{atom(), term()@}}).
 %%%
 %%%   The events send with these functions have following structure:
 %%%   {@type @{log, pid(), info | warning | error, event_type(),
@@ -119,13 +121,60 @@ message(Message) when is_binary(Message) ->
 %% @doc Start example process.
 
 start() ->
-  gen_event:start({local, ?MODULE}).
+  case gen_event:start({local, ?MODULE}) of
+    {ok, Pid} ->
+      case add_handlers(Pid, get_handlers()) of
+        ok ->
+          {ok, Pid};
+        {error, Reason} ->
+          gen_event:stop(Pid),
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
 
 %% @private
 %% @doc Start example process.
 
 start_link() ->
-  gen_event:start_link({local, ?MODULE}).
+  case gen_event:start_link({local, ?MODULE}) of
+    {ok, Pid} ->
+      case add_handlers(Pid, get_handlers()) of
+        ok ->
+          {ok, Pid};
+        {error, Reason} ->
+          gen_event:stop(Pid),
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Get handlers defined in application environment.
+
+-spec get_handlers() ->
+  [{atom(), term()}].
+
+get_handlers() ->
+  case application:get_env(korrpcdid, log_handlers) of
+    {ok, LogHandlers} -> LogHandlers;
+    undefined -> []
+  end.
+
+%% @doc Add event handlers to gen_event.
+
+-spec add_handlers(pid(), [{atom(), term()}]) ->
+  ok | {error, term()}.
+
+add_handlers(_Pid, [] = _Handlers) ->
+  ok;
+add_handlers(Pid, [{Mod, Args} | Rest] = _Handlers) ->
+  case gen_event:add_handler(Pid, Mod, Args) of
+    ok -> add_handlers(Pid, Rest);
+    {error, Reason} -> {error, {Mod, Reason}};
+    {'EXIT', Reason} -> {error, {exit, Mod, Reason}}
+  end.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

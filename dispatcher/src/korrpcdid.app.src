@@ -4,6 +4,7 @@
   {registered, [
     korrpcdid_sup,
     korrpc_sdb_sup,
+    korrpcdid_log,
     korrpcdid_call_sup,
     korrpcdid_caller_sup,
     korrpcdid_call_queue,
@@ -21,7 +22,8 @@
     %{host_db, ""},
     {host_db_refresh, 900}, % seconds (no more than ~4.3M, but is 49+ days that useful?)
     {default_timeout, 600}, % seconds
-    {max_exec_time, 600}, % seconds
+    {max_exec_time,   600}, % seconds
+    {log_handlers, []}, % for korrpcdid_log; list of `{Module :: atom(), Args :: term()}'
     {listen, [
       {any, 1639}
     ]}
