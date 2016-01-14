@@ -133,7 +133,7 @@ handle_info(timeout = _Message,
       {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
       korrpcdid_log:info(?LOG_CAT, "returning job's result",
                          [{client, {term, Peer}}, {job, {str, JobID}},
-                          {result, FormattedResult}, {wait, false}]),
+                          {result, FormattedResult}, {wait, true}]),
       send_response(State, FormattedResult),
       {stop, normal, State}
   end;
@@ -183,14 +183,14 @@ when is_binary(Type), is_binary(Message) ->
 format_result({error, Reason} = _Result) when is_atom(Reason) ->
   [{<<"error">>, [
     {<<"type">>, atom_to_binary(Reason, utf8)},
-    {<<"message">>, inet:format_error(Reason)}
+    {<<"message">>, list_to_binary(inet:format_error(Reason))}
   ]}];
 format_result({error, Reason} = _Result) ->
   [{<<"error">>, [
     {<<"type">>, <<"unrecognized">>},
     % hopefully 1024 chars will be enough; if not, pity, it's still serialized
     % to JSON
-    {<<"message">>, iolist_to_binary(iolib:format("~1024p", [Reason]))}
+    {<<"message">>, iolist_to_binary(io_lib:format("~1024p", [Reason]))}
   ]}];
 format_result(undefined = _Result) ->
   % no such job

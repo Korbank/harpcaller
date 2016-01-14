@@ -104,10 +104,9 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
   case gen_tcp:accept(Socket, ?ACCEPT_INTERVAL) of
     {ok, Client} ->
       % when could a valid socket render an error?
-      {ok, {PeerAddr, PeerPort}} = inet:peername(Client),
+      {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
       korrpcdid_log:info(?LOG_CAT, "new connection",
-                         [{client_address, {term, PeerAddr}},
-                          {client_port, PeerPort}]),
+                         [{client, {term, Peer}}]),
       {ok, Pid} = korrpcdid_tcp_worker_sup:spawn_worker(Client),
       case gen_tcp:controlling_process(Client, Pid) of
         ok -> ok;

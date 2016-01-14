@@ -125,7 +125,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
                           {host, Host},
                           {procedure, Proc}, {procedure_arguments, Args},
                           {timeout, Timeout}, {max_exec_time, MaxExecTime},
-                          {queue, {term, Queue}}]),
+                          {queue, queue_log_info(Queue)}]),
       Options = case {Timeout, MaxExecTime} of
         {undefined, undefined} ->
           [];
@@ -367,6 +367,16 @@ send_response(Socket, Response) ->
   {ok, Line} = korrpc_json:encode(Response),
   ok = gen_tcp:send(Socket, [Line, $\n]),
   ok.
+
+%% @doc Encode queue specification as a JSON-serializable object.
+
+-spec queue_log_info({korrpc_json:jhash(), pos_integer()} | undefined) ->
+  korrpc_json:jhash() | null.
+
+queue_log_info({QueueName, QueueConcurrency} = _QueueSpec) ->
+  [{name, QueueName}, {concurrency, QueueConcurrency}];
+queue_log_info(undefined = _QueueSpec) ->
+  null.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
