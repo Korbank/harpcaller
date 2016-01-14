@@ -1,0 +1,33 @@
+#!/usr/bin/escript
+%%!
+%%----------------------------------------------------------------------------
+
+main([])     -> main(["--help"]);
+main(["-h"]) -> main(["--help"]);
+main(["--help"]) ->
+  Script = filename:basename(escript:script_name()),
+  io:fwrite("KorRPC dispatcher daemon.~n"),
+  io:fwrite("Controlling daemon:~n"),
+  io:fwrite("  ~s [--socket=...] start [--config=...]~n", [Script]),
+  io:fwrite("  ~s [--socket=...] wait-for-start [--timeout=...]~n", [Script]),
+  io:fwrite("  ~s [--socket=...] stop~n", [Script]),
+  io:fwrite("  ~s [--socket=...] reload-config~n", [Script]),
+  io:fwrite("Jobs:~n"),
+  io:fwrite("  ~s [--socket=...] list~n", [Script]),
+  io:fwrite("  ~s [--socket=...] cancel <job-id>~n", [Script]),
+  io:fwrite("Hosts registry:~n"),
+  io:fwrite("  ~s [--socket=...] hosts-list~n", [Script]),
+  io:fwrite("  ~s [--socket=...] hosts-refresh~n", [Script]),
+  io:fwrite("Job queues:~n"),
+  io:fwrite("  ~s [--socket=...] queue-list~n", [Script]),
+  io:fwrite("  ~s [--socket=...] queue-list <queue-name>~n", [Script]),
+  io:fwrite("  ~s [--socket=...] queue-cancel <queue-name>~n", [Script]),
+  io:fwrite("Distributed Erlang support:~n"),
+  io:fwrite("  ~s [--socket=...] dist-erl-start~n", [Script]),
+  io:fwrite("  ~s [--socket=...] dist-erl-stop~n", [Script]),
+  ok;
+
+main(_) -> main(["--help"]).
+
+%%----------------------------------------------------------------------------
+%% vim:ft=erlang
