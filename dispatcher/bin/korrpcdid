@@ -2,32 +2,207 @@
 %%!
 %%----------------------------------------------------------------------------
 
-main([])     -> main(["--help"]);
-main(["-h"]) -> main(["--help"]);
-main(["--help"]) ->
-  Script = filename:basename(escript:script_name()),
-  io:fwrite("KorRPC dispatcher daemon.~n"),
-  io:fwrite("Controlling daemon:~n"),
-  io:fwrite("  ~s [--socket=...] start [--config=...]~n", [Script]),
-  io:fwrite("  ~s [--socket=...] wait-for-start [--timeout=...]~n", [Script]),
-  io:fwrite("  ~s [--socket=...] stop~n", [Script]),
-  io:fwrite("  ~s [--socket=...] reload-config~n", [Script]),
-  io:fwrite("Jobs:~n"),
-  io:fwrite("  ~s [--socket=...] list~n", [Script]),
-  io:fwrite("  ~s [--socket=...] cancel <job-id>~n", [Script]),
-  io:fwrite("Hosts registry:~n"),
-  io:fwrite("  ~s [--socket=...] hosts-list~n", [Script]),
-  io:fwrite("  ~s [--socket=...] hosts-refresh~n", [Script]),
-  io:fwrite("Job queues:~n"),
-  io:fwrite("  ~s [--socket=...] queue-list~n", [Script]),
-  io:fwrite("  ~s [--socket=...] queue-list <queue-name>~n", [Script]),
-  io:fwrite("  ~s [--socket=...] queue-cancel <queue-name>~n", [Script]),
-  io:fwrite("Distributed Erlang support:~n"),
-  io:fwrite("  ~s [--socket=...] dist-erl-start~n", [Script]),
-  io:fwrite("  ~s [--socket=...] dist-erl-stop~n", [Script]),
-  ok;
-
-main(_) -> main(["--help"]).
+-record(cmd, {
+  op :: start | wait_for_start | stop | reload_config |
+        list_jobs | cancel_job |
+        list_hosts | refresh_hosts |
+        list_queues | list_queue | cancel_queue |
+        dist_start | dist_stop,
+  socket = "/var/run/korrpcdid/korrpcdid.sock" :: file:filename(),
+  options = [] :: [{Name :: string(), Value :: term()}],
+  args    = [] :: [string()]
+}).
 
 %%----------------------------------------------------------------------------
-%% vim:ft=erlang
+%% help {{{
+
+help() ->
+  help(standard_io).
+
+help(IO) ->
+  Script = filename:basename(escript:script_name()),
+  io:fwrite(IO, "KorRPC dispatcher daemon.~n", []),
+  io:fwrite(IO, "Controlling daemon:~n", []),
+  io:fwrite(IO, "  ~s [--socket=...] start [--config=...]~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] wait-for-start [--timeout=...]~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] stop~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] reload-config~n", [Script]),
+  io:fwrite(IO, "Jobs:~n", []),
+  io:fwrite(IO, "  ~s [--socket=...] list~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] cancel <job-id>~n", [Script]),
+  io:fwrite(IO, "Hosts registry:~n", []),
+  io:fwrite(IO, "  ~s [--socket=...] hosts-list~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] hosts-refresh~n", [Script]),
+  io:fwrite(IO, "Job queues:~n", []),
+  io:fwrite(IO, "  ~s [--socket=...] queue-list~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] queue-list <queue-name>~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] queue-cancel <queue-name>~n", [Script]),
+  io:fwrite(IO, "Distributed Erlang support:~n", []),
+  io:fwrite(IO, "  ~s [--socket=...] dist-erl-start~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] dist-erl-stop~n", [Script]),
+  ok.
+
+%% }}}
+%%----------------------------------------------------------------------------
+
+main([])         -> help();
+main(["-h"])     -> help();
+main(["--help"]) -> help();
+
+main(CmdLineArgs) ->
+  case parse_options(CmdLineArgs) of
+    {ok, #cmd{op = Op, socket = Socket, options = Opts, args = Args}} ->
+      io:fwrite("operation: ~p~n", [Op]),
+      io:fwrite("args:    ~1024p~n", [Args]),
+      io:fwrite("socket:  ~s~n", [Socket]),
+      io:fwrite("options: ~1024p~n", [Opts]),
+      ok;
+    help ->
+      help();
+    {error, Message} ->
+      io:fwrite(standard_error, "Error: ~s~n~n", [Message]),
+      help(standard_error),
+      init:stop(1)
+  end.
+
+%%----------------------------------------------------------------------------
+
+%%----------------------------------------------------------------------------
+%% parse command line arguments {{{
+
+parse_options(Args) ->
+  case parse_options(Args, #cmd{}) of
+    {ok, _Cmd = #cmd{op = undefined}} ->
+      {error, "no command supplied"};
+    {ok, _Cmd = #cmd{op = cancel_job, args = []}} ->
+      {error, "no job specified"};
+    {ok, Cmd = #cmd{op = cancel_job, args = [_JobID]}} ->
+      {ok, Cmd};
+    {ok, Cmd = #cmd{op = list_queue, args = []}} ->
+      NewCmd = Cmd#cmd{op = list_queues},
+      {ok, NewCmd};
+    {ok, Cmd = #cmd{op = list_queue, args = [_Queue]}} ->
+      {ok, Cmd};
+    {ok, _Cmd = #cmd{op = cancel_queue, args = []}} ->
+      {error, "no queue specified"};
+    {ok, Cmd = #cmd{op = cancel_queue, args = [_Queue]}} ->
+      {ok, Cmd};
+    {ok, Cmd = #cmd{op = _, args = []}} ->
+      {ok, Cmd}; % all other command are zero-argument
+    {ok, _Cmd = #cmd{op = _, args = [_ | _]}} ->
+      {error, "too many arguments"};
+    help ->
+      help;
+    {error, Message} ->
+      {error, Message}
+  end.
+
+parse_options(["--help" | _Rest] = _Args, _Cmd = #cmd{}) ->
+  help;
+
+parse_options(["--socket=" ++ Socket | Rest] = _Args, Cmd = #cmd{}) ->
+  parse_options(["--socket", Socket | Rest], Cmd);
+parse_options(["--socket", Socket | Rest] = _Args, Cmd = #cmd{}) ->
+  NewCmd = Cmd#cmd{socket = Socket},
+  parse_options(Rest, NewCmd);
+
+parse_options(["--config=" ++ Config | Rest] = _Args, Cmd = #cmd{}) ->
+  parse_options(["--config", Config | Rest], Cmd);
+parse_options(["--config", Config | Rest] = _Args, Cmd = #cmd{options = Opts}) ->
+  NewCmd = Cmd#cmd{options = [{"config", Config} | Opts]},
+  parse_options(Rest, NewCmd);
+
+parse_options(["--timeout=" ++ Timeout | Rest] = _Args, Cmd = #cmd{}) ->
+  parse_options(["--timeout", Timeout | Rest], Cmd);
+parse_options(["--timeout", Timeout | Rest] = _Args, Cmd = #cmd{options = Opts}) ->
+  case parse_integer(Timeout) of
+    TimeoutInt when is_integer(TimeoutInt), TimeoutInt > 0 ->
+      NewCmd = Cmd#cmd{options = [{"timeout", TimeoutInt} | Opts]},
+      parse_options(Rest, NewCmd);
+    TimeoutInt when is_integer(TimeoutInt), TimeoutInt =< 0 ->
+      {error, "invalid --timeout: negative"};
+    error ->
+      {error, "invalid --timeout: not an integer"}
+  end;
+
+parse_options(["--" ++ _ = Option | _Rest] = _Args, _Cmd = #cmd{}) ->
+  {Opt, _Value} = split_option(Option),
+  {error, "unrecognized option: " ++ Opt};
+
+parse_options(["start" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = start},
+  parse_options(Rest, NewCmd);
+parse_options(["wait-for-start" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = wait_for_start},
+  parse_options(Rest, NewCmd);
+parse_options(["stop" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = stop},
+  parse_options(Rest, NewCmd);
+parse_options(["reload-config" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = reload_config},
+  parse_options(Rest, NewCmd);
+
+parse_options(["list" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = list_jobs},
+  parse_options(Rest, NewCmd);
+parse_options(["cancel" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = cancel_job},
+  parse_options(Rest, NewCmd);
+
+parse_options(["hosts-list" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = list_hosts},
+  parse_options(Rest, NewCmd);
+parse_options(["hosts-refresh" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = refresh_hosts},
+  parse_options(Rest, NewCmd);
+
+parse_options(["queue-list" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = list_queue},
+  parse_options(Rest, NewCmd);
+parse_options(["queue-cancel" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = cancel_queue},
+  parse_options(Rest, NewCmd);
+
+parse_options(["dist-erl-start" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = dist_start},
+  parse_options(Rest, NewCmd);
+parse_options(["dist-erl-stop" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
+  NewCmd = Cmd#cmd{op = dist_stop},
+  parse_options(Rest, NewCmd);
+
+parse_options([Arg | _Rest] = _Args, _Cmd = #cmd{op = undefined}) ->
+  {error, "unrecognized command: " ++ Arg};
+
+parse_options([Arg | Rest] = _Args, Cmd = #cmd{args = ListArgs}) ->
+  NewCmd = Cmd#cmd{args = [Arg | ListArgs]},
+  parse_options(Rest, NewCmd);
+
+parse_options([] = _Args, Cmd = #cmd{args = ListArgs}) ->
+  NewCmd = Cmd#cmd{args = lists:reverse(ListArgs)},
+  {ok, NewCmd}.
+
+%%----------------------------------------------------------
+%% helpers {{{
+
+parse_integer(String) ->
+  try
+    list_to_integer(String)
+  catch
+    error:badarg -> error
+  end.
+
+split_option(String) ->
+  case string:chr(String, $=) of
+    0 ->
+      {String, none};
+    N when N > 0 ->
+      {Option, [$= | Value]} = lists:split(N - 1, String),
+      {Option, Value}
+  end.
+
+%% }}}
+%%----------------------------------------------------------
+
+%% }}}
+%%----------------------------------------------------------------------------
+%% vim:ft=erlang:foldmethod=marker
