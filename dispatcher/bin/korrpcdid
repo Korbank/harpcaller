@@ -1,5 +1,5 @@
 #!/usr/bin/escript
-%%!
+%%! -env ERL_LIBS deps
 %%----------------------------------------------------------------------------
 
 -record(cmd, {
@@ -51,21 +51,56 @@ main(["--help"]) -> help();
 
 main(CmdLineArgs) ->
   case parse_options(CmdLineArgs) of
-    {ok, #cmd{op = Op, socket = Socket, options = Opts, args = Args}} ->
-      io:fwrite("operation: ~p~n", [Op]),
-      io:fwrite("args:    ~1024p~n", [Args]),
-      io:fwrite("socket:  ~s~n", [Socket]),
-      io:fwrite("options: ~1024p~n", [Opts]),
-      ok;
+    {ok, Command} ->
+      cmd(Command);
     help ->
       help();
     {error, Message} ->
       io:fwrite(standard_error, "Error: ~s~n~n", [Message]),
       help(standard_error),
-      init:stop(1)
+      halt(1)
   end.
 
 %%----------------------------------------------------------------------------
+
+cmd(_Cmd = #cmd{op = start, socket = _Socket, options = _Options}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = wait_for_start, socket = _Socket, options = _Options}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = stop, socket = _Socket}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = reload_config, socket = _Socket}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = list_jobs, socket = _Socket}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = cancel_job, socket = _Socket, args = [_JobID]}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = list_hosts, socket = _Socket}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = refresh_hosts, socket = _Socket}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = list_queues, socket = _Socket}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = list_queue, socket = _Socket, args = [_Queue]}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = cancel_queue, socket = _Socket, args = [_Queue]}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = dist_start, socket = _Socket}) ->
+  'TODO';
+
+cmd(_Cmd = #cmd{op = dist_stop, socket = _Socket}) ->
+  'TODO'.
 
 %%----------------------------------------------------------------------------
 %% parse command line arguments {{{
