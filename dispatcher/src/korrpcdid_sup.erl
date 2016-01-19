@@ -34,6 +34,8 @@ start_link() ->
 init([] = _Args) ->
   Strategy = {one_for_one, 5, 10},
   Children = [
+    {korrpcdid_commander, {korrpcdid_commander, start_link, []},
+      permanent, 1000, worker, [korrpcdid_commander]},
     {korrpcdid_log, {korrpcdid_log, start_link, []},
       permanent, 1000, worker, dynamic},
     {korrpc_sdb_sup, {korrpc_sdb_sup, start_link, []},

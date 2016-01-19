@@ -2,13 +2,18 @@
 %%! -env ERL_LIBS deps
 %%----------------------------------------------------------------------------
 
+-define(DEFAULT_CONFIG_FILE, "/etc/korrpcdid/korrpcdid.toml").
+-define(DEFAULT_SOCKET_PATH, "/var/run/korrpcdid/korrpcdid.sock").
+
+%% TODO: pidfile
+%% TODO: reload code
 -record(cmd, {
   op :: start | wait_for_start | stop | reload_config |
         list_jobs | cancel_job |
         list_hosts | refresh_hosts |
         list_queues | list_queue | cancel_queue |
         dist_start | dist_stop,
-  socket = "/var/run/korrpcdid/korrpcdid.sock" :: file:filename(),
+  socket = ?DEFAULT_SOCKET_PATH :: file:filename(),
   options = [] :: [{Name :: string(), Value :: term()}],
   args    = [] :: [string()]
 }).
@@ -25,7 +30,7 @@ help(IO) ->
   io:fwrite(IO, "Controlling daemon:~n", []),
   io:fwrite(IO, "  ~s [--socket=...] start [--config=...]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] wait-for-start [--timeout=...]~n", [Script]),
-  io:fwrite(IO, "  ~s [--socket=...] stop~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] stop [--timeout=...]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] reload-config~n", [Script]),
   io:fwrite(IO, "Jobs:~n", []),
   io:fwrite(IO, "  ~s [--socket=...] list~n", [Script]),
@@ -52,7 +57,13 @@ main(["--help"]) -> help();
 main(CmdLineArgs) ->
   case parse_options(CmdLineArgs) of
     {ok, Command} ->
-      cmd(Command);
+      case cmd(Command) of
+        ok ->
+          ok;
+        {error, Message} ->
+          io:fwrite(standard_error, "~s~n", [Message]),
+          halt(1)
+      end;
     help ->
       help();
     {error, Message} ->
@@ -63,47 +74,313 @@ main(CmdLineArgs) ->
 
 %%----------------------------------------------------------------------------
 
-cmd(_Cmd = #cmd{op = start, socket = _Socket, options = _Options}) ->
-  'TODO';
+%% @doc Execute command specified in command line.
 
-cmd(_Cmd = #cmd{op = wait_for_start, socket = _Socket, options = _Options}) ->
-  'TODO';
+-spec cmd(#cmd{}) ->
+  ok | {error, iolist()}.
 
-cmd(_Cmd = #cmd{op = stop, socket = _Socket}) ->
-  'TODO';
+%% start the daemon
+cmd(_Cmd = #cmd{op = start, socket = Socket, options = Options}) ->
+  ConfigFile = proplists:get_value("config", Options, ?DEFAULT_CONFIG_FILE),
+  case ok = setup_korrpcdid(ConfigFile) of
+    ok ->
+      indira:set_option(indira, listen, [{indira_unix, Socket}]),
+      indira:set_option(indira, commander, korrpcdid_commander),
+      indira:start_rec(indira),
+      indira:start_rec(korrpcdid),
+      indira:sleep_forever(),
+      ok; % never reached
+    {error, Message} ->
+      {error, ["Configuration error: ", Message]}
+  end;
 
-cmd(_Cmd = #cmd{op = reload_config, socket = _Socket}) ->
-  'TODO';
+%% wait for daemon to start completely
+cmd(_Cmd = #cmd{op = wait_for_start, socket = Socket, options = Options}) ->
+  Timeout = proplists:get_value("timeout", Options, infinity),
+  case retry_send_command(Socket, wait_for_start, Timeout) of
+    {ok, _Reply} ->
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = list_jobs, socket = _Socket}) ->
-  'TODO';
+%% stop the daemon
+cmd(_Cmd = #cmd{op = stop, socket = Socket, options = Options}) ->
+  Timeout = proplists:get_value("timeout", Options, infinity),
+  case send_command(Socket, stop, Timeout) of
+    {ok, [{<<"pid">>, DaemonPID}, {<<"result">>, <<"ok">>}] = _Reply} ->
+      % reply to `stop' command got through before the Erlang system shut
+      % down; print the daemon's PID and let the caller wait for it to
+      % disappear
+      % TODO: only print PID on request
+      io:fwrite("~s~n", [DaemonPID]),
+      ok;
+    {error, closed} ->
+      % this should never happen, but just in case the daemon's Erlang system
+      % shut down without allowing the reply to pass through, handle this
+      % situation as well
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = cancel_job, socket = _Socket, args = [_JobID]}) ->
-  'TODO';
+%% order the daemon to reload its config
+cmd(_Cmd = #cmd{op = reload_config, socket = Socket}) ->
+  case send_command(Socket, reload_config) of
+    {ok, _Reply} ->
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = list_hosts, socket = _Socket}) ->
-  'TODO';
+%% list RPC jobs the daemon currently runs
+cmd(_Cmd = #cmd{op = list_jobs, socket = Socket}) ->
+  case send_command(Socket, list_jobs) of
+    {ok, Reply} ->
+      io:fwrite("# jobs:~n"),
+      io:fwrite("% ~1024p~n", [Reply]),
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = refresh_hosts, socket = _Socket}) ->
-  'TODO';
+%% cancel specific RPC job
+cmd(_Cmd = #cmd{op = cancel_job, socket = Socket, args = [JobID]}) ->
+  case send_command(Socket, {cancel_job, job, JobID}) of
+    {ok, _Reply} ->
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = list_queues, socket = _Socket}) ->
-  'TODO';
+%% list hosts the daemon knows about
+cmd(_Cmd = #cmd{op = list_hosts, socket = Socket}) ->
+  case send_command(Socket, list_hosts) of
+    {ok, Reply} ->
+      io:fwrite("# hosts:~n"),
+      io:fwrite("% ~1024p~n", [Reply]),
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = list_queue, socket = _Socket, args = [_Queue]}) ->
-  'TODO';
+%% order the daemon to refresh its known hosts registry
+cmd(_Cmd = #cmd{op = refresh_hosts, socket = Socket}) ->
+  case send_command(Socket, refresh_hosts) of
+    {ok, _Reply} ->
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = cancel_queue, socket = _Socket, args = [_Queue]}) ->
-  'TODO';
+%% list job queues daemon currently has defined (non-empty)
+cmd(_Cmd = #cmd{op = list_queues, socket = Socket}) ->
+  case send_command(Socket, list_queues) of
+    {ok, Reply} ->
+      io:fwrite("# queues:~n"),
+      io:fwrite("% ~1024p~n", [Reply]),
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = dist_start, socket = _Socket}) ->
-  'TODO';
+%% list specific job queue
+cmd(_Cmd = #cmd{op = list_queue, socket = Socket, args = [Queue]}) ->
+  case send_command(Socket, {list_queue, 'queue', Queue}) of
+    {ok, Reply} ->
+      io:fwrite("# queue ~s:~n", [Queue]),
+      io:fwrite("% ~1024p~n", [Reply]),
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
 
-cmd(_Cmd = #cmd{op = dist_stop, socket = _Socket}) ->
-  'TODO'.
+%% clear all the jobs from specific queue
+cmd(_Cmd = #cmd{op = cancel_queue, socket = Socket, args = [Queue]}) ->
+  case send_command(Socket, {cancel_queue, 'queue', Queue}) of
+    {ok, _Reply} ->
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
+
+%% order the daemon to setup its node for distributed Erlang environment
+cmd(_Cmd = #cmd{op = dist_start, socket = Socket}) ->
+  case send_command(Socket, dist_start) of
+    {ok, _Reply} ->
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end;
+
+%% order the daemon to tear down its distributed Erlang part
+cmd(_Cmd = #cmd{op = dist_stop, socket = Socket}) ->
+  case send_command(Socket, dist_stop) of
+    {ok, _Reply} ->
+      ok;
+    {error, Reason} ->
+      Message = io_lib:format("communication error: ~1024p", [Reason]),
+      {error, Message}
+  end.
 
 %%----------------------------------------------------------------------------
+%% control socket commands {{{
+
+%% @doc Send a command through specified socket to a running daemon.
+%%
+%%   `Command' is a term suitable for {@link encode_command/1}.
+%%
+%%   Function waits infinitely for a response.
+
+-spec send_command(file:filename(), term()) ->
+  {ok, term()} | {error, term()}.
+
+send_command(Socket, Command) ->
+  send_command(Socket, Command, infinity).
+
+%% @doc Send a command through specified socket to a running daemon.
+%%
+%%   `Command' is a term suitable for {@link encode_command/1}.
+%%
+%%   Function waits `Timeout' seconds for a response.
+
+-spec send_command(file:filename(), term(), timeout()) ->
+  {ok, term()} | {error, term()}.
+
+send_command(Socket, Command, Timeout) ->
+  Line = encode_command(Command),
+  case connect_send_recv_line(Socket, Line, seconds_to_milliseconds(Timeout)) of
+    {ok, ReplyLine} ->
+      Reply = decode_command_reply(ReplyLine),
+      {ok, Reply};
+    {error, Reason} ->
+      {error, Reason} % TODO: format `Reason'
+  end.
+
+%% @doc Send a command through specified socket to a running daemon, retrying
+%%   if the socket doesn't exist yet.
+%%
+%%   `Command' is a term suitable for {@link encode_command/1}.
+%%
+%%   Function waits `Timeout' seconds for the socket to appear, and then
+%%   another `Timeout' seconds for a response.
+
+-spec retry_send_command(file:filename(), term(), timeout()) ->
+  {ok, term()} | {error, term()}.
+
+retry_send_command(Socket, Command, Timeout) ->
+  TimeoutRef = make_ref(),
+  case Timeout of
+    _ when is_integer(Timeout) ->
+      % don't need to remember this timer, as it's just one of them, and the
+      % Erlang machine will halt
+      _Ref = erlang:send_after(Timeout * 1000, self(), {timeout, TimeoutRef});
+    infinity ->
+      ok
+  end,
+  retry_send_command(Socket, Command, Timeout, TimeoutRef).
+
+%% @doc Worker for {@link retry_send_command/3}.
+
+-spec retry_send_command(file:filename(), term(), timeout(), reference()) ->
+  {ok, term()} | {error, term()}.
+
+retry_send_command(Socket, Command, Timeout, TimeoutRef) ->
+  % try connecting to the socket
+  % if it succeeds, excellent
+  % if it fails because the socket doesn't exist (yet), try after 100ms (watch
+  % for requested timeout)
+  % if it fails for any reason other than the socket doesn't exist (yet), it's
+  % a permanent failure
+  case send_command(Socket, Command, Timeout) of
+    {ok, Reply} ->
+      {ok, Reply};
+    {error, enoent} ->
+      receive
+        {timeout, TimeoutRef} ->
+          {error, timeout}
+      after 100 ->
+          retry_send_command(Socket, Command, Timeout, TimeoutRef)
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Connect to specified socket, send a line, read a line, and close
+%%   socket.
+%%
+%%   Waits `Timeout' milliseconds for a response.
+
+-spec connect_send_recv_line(file:filename(), iolist(), timeout()) ->
+  {ok, binary()} | {error, term()}.
+
+connect_send_recv_line(SocketPath, Line, Timeout) ->
+  case indira_af_unix:connect(SocketPath, [{active, false}]) of
+    {ok, Socket} ->
+      ok = indira_af_unix:send(Socket, [Line, $\n]),
+      RecvResult = indira_af_unix:recv(Socket, 0, Timeout),
+      ok = indira_af_unix:close(Socket),
+      RecvResult;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Encode command as a JSON line.
+
+-spec encode_command(atom() |
+                     {Cmd :: atom(), ArgName :: atom() | string() | binary(),
+                      ArgValue :: atom() | string() | binary()}) ->
+  iolist().
+
+encode_command(Command) when is_atom(Command) ->
+  {ok, Line} = korrpc_json:encode([{command, Command}]),
+  Line;
+encode_command({C, ArgName, ArgValue} = _Command) when is_list(ArgName) ->
+  encode_command({C, list_to_binary(ArgName), ArgValue});
+encode_command({C, ArgName, ArgValue} = _Command) when is_list(ArgValue) ->
+  encode_command({C, ArgName, list_to_binary(ArgValue)});
+encode_command({C, ArgName, ArgValue} = _Command) ->
+  {ok, Line} = korrpc_json:encode([{command, C}, {ArgName, ArgValue}]),
+  Line.
+
+%% @doc Decode response to an earlier sent command to jsx-like structure.
+
+-spec decode_command_reply(string() | binary()) ->
+  term().
+
+decode_command_reply(ReplyLine) ->
+  {ok, Reply} = korrpc_json:decode(ReplyLine), % Indira won't fail us here
+  Reply.
+
+%% @doc Convert timeout specified in seconds to a timeout in milliseconds.
+
+-spec seconds_to_milliseconds(timeout()) ->
+  timeout().
+
+seconds_to_milliseconds(infinity = _Timeout) ->
+  infinity;
+seconds_to_milliseconds(Timeout) when is_integer(Timeout) ->
+  Timeout * 1000.
+
+%% }}}
+%%----------------------------------------------------------------------------
 %% parse command line arguments {{{
+
+%% @doc Parse command line arguments.
+
+-spec parse_options([string()]) ->
+  {ok, #cmd{}} | help | {error, string()}.
 
 parse_options(Args) ->
   case parse_options(Args, #cmd{}) of
@@ -132,19 +409,24 @@ parse_options(Args) ->
       {error, Message}
   end.
 
+%% @doc Recursive worker for {@link parse_options/1}.
+
+-spec parse_options([string()], #cmd{}) ->
+  {ok, #cmd{}} | help | {error, string()}.
+
 parse_options(["--help" | _Rest] = _Args, _Cmd = #cmd{}) ->
   help;
 
-parse_options(["--socket=" ++ Socket | Rest] = _Args, Cmd = #cmd{}) ->
-  parse_options(["--socket", Socket | Rest], Cmd);
-parse_options(["--socket", Socket | Rest] = _Args, Cmd = #cmd{}) ->
-  NewCmd = Cmd#cmd{socket = Socket},
+parse_options(["--socket=" ++ Path | Rest] = _Args, Cmd = #cmd{}) ->
+  parse_options(["--socket", Path | Rest], Cmd);
+parse_options(["--socket", Path | Rest] = _Args, Cmd = #cmd{}) ->
+  NewCmd = Cmd#cmd{socket = Path},
   parse_options(Rest, NewCmd);
 
-parse_options(["--config=" ++ Config | Rest] = _Args, Cmd = #cmd{}) ->
-  parse_options(["--config", Config | Rest], Cmd);
-parse_options(["--config", Config | Rest] = _Args, Cmd = #cmd{options = Opts}) ->
-  NewCmd = Cmd#cmd{options = [{"config", Config} | Opts]},
+parse_options(["--config=" ++ File | Rest] = _Args, Cmd = #cmd{}) ->
+  parse_options(["--config", File | Rest], Cmd);
+parse_options(["--config", File | Rest] = _Args, Cmd = #cmd{options = Opts}) ->
+  NewCmd = Cmd#cmd{options = [{"config", File} | Opts]},
   parse_options(Rest, NewCmd);
 
 parse_options(["--timeout=" ++ Timeout | Rest] = _Args, Cmd = #cmd{}) ->
@@ -219,12 +501,23 @@ parse_options([] = _Args, Cmd = #cmd{args = ListArgs}) ->
 %%----------------------------------------------------------
 %% helpers {{{
 
+%% @doc Convert string to an integer.
+
+-spec parse_integer(string()) ->
+  integer() | error.
+
 parse_integer(String) ->
   try
     list_to_integer(String)
   catch
     error:badarg -> error
   end.
+
+%% @doc Split option and value parts from an option with value (`--foo=bar').
+%%   Simple options (`--foo') get `none' as a value.
+
+-spec split_option(string()) ->
+  {string(), string()} | {string(), none}.
 
 split_option(String) ->
   case string:chr(String, $=) of
@@ -234,6 +527,259 @@ split_option(String) ->
       {Option, [$= | Value]} = lists:split(N - 1, String),
       {Option, Value}
   end.
+
+%% }}}
+%%----------------------------------------------------------
+
+%% }}}
+%%----------------------------------------------------------------------------
+%% configure KorRPC dispatcher daemon {{{
+
+%% @doc Setup `korrpcdid' Erlang application with values from config file.
+
+-spec setup_korrpcdid(file:filename()) ->
+  ok | {error, iolist()}.
+
+setup_korrpcdid(ConfigFile) ->
+  case read_config(ConfigFile) of
+    {ok, Config} ->
+      % TODO: catch configuration errors
+      ok = setup_network(Config),
+      ok = setup_streaming(Config),
+      ok = setup_host_db(Config),
+      ok = setup_logging(Config),
+      ok = setup_erlang(proplists:get_value(<<"erlang">>, Config, [])),
+      ok;
+    {error, Message} ->
+      {error, Message}
+  end.
+
+%%----------------------------------------------------------
+%% setup_network() {{{
+
+%% @doc Setup network part of `korrpcdid' configuration.
+
+-spec setup_network([{binary(), term()}]) ->
+  ok | {error, iolist()}.
+
+setup_network(Config) ->
+  case proplists:get_value(<<"listen">>, Config) of
+    [_ | _] = ListenSpecStrings ->
+      ListenSpecs = [parse_listen_spec(S) || S <- ListenSpecStrings],
+      indira:set_option(korrpcdid, listen, ListenSpecs);
+    undefined -> ignore;
+    [] -> ignore;
+    _ -> error
+  end,
+  ok.
+
+%% @doc Convert listening address specification from config file to format
+%%   suitable for application environment.
+
+-spec parse_listen_spec(binary()) ->
+  {any | inet:hostname(), inet:port_number()}.
+
+parse_listen_spec(Spec) when is_binary(Spec) ->
+  % die when the listen specification doesn't match what we expect
+  case binary:split(Spec, <<":">>) of
+    [<<"*">>, PortBin] -> {any, bin2int(PortBin)};
+    [AddrBin, PortBin] -> {binary_to_list(AddrBin), bin2int(PortBin)}
+  end.
+
+%% @doc Convert string representation of an integer to integer itself.
+
+-spec bin2int(binary()) ->
+  pos_integer().
+
+%% only accept positive integers
+bin2int(<<C:8, _/binary>> = Binary) when C >= $1, C =< $9 ->
+  list_to_integer(binary_to_list(Binary)).
+
+%% }}}
+%%----------------------------------------------------------
+%% setup_streaming() {{{
+
+%% @doc Setup RPC stream receiving part of `korrpcdid' configuration.
+
+-spec setup_streaming([{binary(), term()}]) ->
+  ok | {error, iolist()}.
+
+setup_streaming(Config) ->
+  case proplists:get_value(<<"stream_directory">>, Config) of
+    StreamDir when is_binary(StreamDir) ->
+      indira:set_option(korrpcdid, stream_directory, binary_to_list(StreamDir));
+    undefined -> ignore;
+    _ -> error
+  end,
+  case proplists:get_value(<<"default_timeout">>, Config) of
+    Timeout when is_integer(Timeout), Timeout > 0 ->
+      indira:set_option(korrpcdid, default_timeout, Timeout);
+    undefined -> ignore;
+    _ -> error
+  end,
+  case proplists:get_value(<<"max_exec_time">>, Config) of
+    MaxExecTime when is_integer(MaxExecTime), MaxExecTime > 0 ->
+      indira:set_option(korrpcdid, max_exec_time, MaxExecTime);
+    undefined -> ignore;
+    _ -> error
+  end,
+  ok.
+
+%% }}}
+%%----------------------------------------------------------
+%% setup_host_db() {{{
+
+%% @doc Setup host registry part of `korrpcdid' configuration.
+
+-spec setup_host_db([{binary(), term()}]) ->
+  ok | {error, iolist()}.
+
+setup_host_db(Config) ->
+  case proplists:get_value(<<"host_db_script">>, Config) of
+    HostDBScript when is_binary(HostDBScript) ->
+      indira:set_option(korrpcdid, host_db_script, binary_to_list(HostDBScript));
+    undefined -> ignore;
+    _ -> error
+  end,
+  case proplists:get_value(<<"host_db">>, Config) of
+    HostDB when is_binary(HostDB) ->
+      indira:set_option(korrpcdid, host_db, binary_to_list(HostDB));
+    undefined -> ignore;
+    _ -> error
+  end,
+  case proplists:get_value(<<"host_db_refresh">>, Config) of
+    HostDBRefresh when is_integer(HostDBRefresh), HostDBRefresh > 0 ->
+      indira:set_option(korrpcdid, host_db_refresh, HostDBRefresh);
+    undefined -> ignore;
+    _ -> error
+  end,
+  ok.
+
+%% }}}
+%%----------------------------------------------------------
+%% setup_logging() {{{
+
+%% @doc Setup application logging part of `korrpcdid' configuration.
+
+-spec setup_logging([{binary(), term()}]) ->
+  ok | {error, iolist()}.
+
+setup_logging(Config) ->
+  case proplists:get_value(<<"log_handlers">>, Config) of
+    BinLogHandlers when is_list(BinLogHandlers) ->
+      LogHandlers = [parse_log_handler_spec(LH) || LH <- BinLogHandlers],
+      indira:set_option(korrpcdid, log_handlers, LogHandlers);
+    undefined -> ignore;
+    _ -> error
+  end,
+  ok.
+
+parse_log_handler_spec(Spec) when is_binary(Spec) ->
+  ModuleName = binary_to_atom(Spec, utf8),
+  ModuleArgs = [],
+  {ModuleName, ModuleArgs}.
+
+%% }}}
+%%----------------------------------------------------------
+%% setup_erlang() {{{
+
+%% @doc Setup Erlang configuration.
+%%   This covers distributed Erlang and system events sent through
+%%   {@link error_logger}.
+
+-spec setup_erlang([{binary(), term()}]) ->
+  ok | {error, iolist()}.
+
+setup_erlang(Config) ->
+  case proplists:get_value(<<"node_name">>, Config) of
+    StreamDir when is_binary(StreamDir) ->
+      'TODO';
+    undefined -> ignore;
+    _ -> error
+  end,
+  case proplists:get_value(<<"name_type">>, Config) of
+    <<"longnames">> ->
+      'TODO';
+    <<"shortnames">> ->
+      'TODO';
+    undefined -> ignore;
+    _ -> error
+  end,
+  case proplists:get_value(<<"cookie_file">>, Config) of
+    CookieFile when is_binary(CookieFile) ->
+      'TODO';
+    undefined -> ignore;
+    _ -> error
+  end,
+  case proplists:get_value(<<"distributed_immediate">>, Config) of
+    true ->
+      'TODO';
+    false ->
+      'TODO';
+    undefined -> ignore;
+    _ -> error
+  end,
+  case proplists:get_value(<<"error_logger_handlers">>, Config) of
+    BinLogHandlers when is_list(BinLogHandlers) ->
+      'TODO';
+    undefined -> ignore;
+    _ -> error
+  end,
+  ok.
+
+%% }}}
+%%----------------------------------------------------------
+
+%%----------------------------------------------------------
+%% parsing config file {{{
+
+%% @doc Read TOML configuration file.
+
+-spec read_config(file:filename()) ->
+  {ok, [{binary(), term()}]} | {error, iolist()}.
+
+read_config(ConfigFile) ->
+  case file:read_file(ConfigFile) of
+    {ok, ConfigContent} ->
+      case etoml:parse(ConfigContent) of
+        {ok, Config} ->
+          {ok, Config};
+        {error, Reason} ->
+          {error, ["parsing error: ", format_toml_error(Reason)]}
+      end;
+    {error, Reason} ->
+      {error, ["reading error: ", format_read_error(Reason)]}
+  end.
+
+%% @doc Format TOML parsing error.
+
+-spec format_toml_error(term()) ->
+  iolist().
+
+format_toml_error({invalid_key, Line} = _Reason) ->
+  io_lib:format("line ~B: invalid key name", [Line]);
+format_toml_error({invalid_group, Line} = _Reason) ->
+  io_lib:format("line ~B: invalid group name", [Line]);
+format_toml_error({invalid_date, Line} = _Reason) ->
+  io_lib:format("line ~B: invalid date format", [Line]);
+format_toml_error({invalid_number, Line} = _Reason) ->
+  io_lib:format("line ~B: invalid number value or forgotten quotes", [Line]);
+format_toml_error({invalid_array, Line} = _Reason) ->
+  io_lib:format("line ~B: invalid array format", [Line]);
+format_toml_error({invalid_string, Line} = _Reason) ->
+  io_lib:format("line ~B: invalid string format", [Line]);
+format_toml_error({undefined_value, Line} = _Reason) ->
+  io_lib:format("line ~B: value not provided", [Line]);
+format_toml_error({duplicated_key, Key}  = _Reason) ->
+  io_lib:format("duplicated key: ~s", [Key]).
+
+%% @doc Format file reading error.
+
+-spec format_read_error(term()) ->
+  string().
+
+format_read_error(Reason) ->
+  file:format_error(Reason).
 
 %% }}}
 %%----------------------------------------------------------
