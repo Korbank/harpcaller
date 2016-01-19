@@ -25,7 +25,7 @@
     {max_exec_time,   600}, % seconds
     {log_handlers, []}, % for korrpcdid_log; list of `{Module :: atom(), Args :: term()}'
     {listen, [
-      {any, 1639}
+      {any, 3502}
     ]}
   ]}
 ]}.
