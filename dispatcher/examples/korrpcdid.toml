@@ -55,6 +55,9 @@ node_name = "korrpcdid"
 name_type = "longnames"
 # text file with magic cookie to use in distributed Erlang
 cookie_file = "/etc/korrpcdid/cookie.txt"
+# start distributed Erlang immediately or on command-line request
+# ("korrpcdid dist-erl-start")
+distributed_immediate = false
 
 # event handlers for error_logger (Erlang system events) to add when starting
 error_logger_handlers = []
