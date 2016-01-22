@@ -7,6 +7,7 @@
 
 %% TODO: pidfile
 %% TODO: reload code
+%% TODO: debug load (`application:start(sasl)')
 -record(cmd, {
   op :: start | wait_for_start | stop | reload_config |
         list_jobs | cancel_job |
@@ -82,16 +83,21 @@ main(CmdLineArgs) ->
 %% start the daemon
 cmd(_Cmd = #cmd{op = start, socket = Socket, options = Options}) ->
   ConfigFile = proplists:get_value("config", Options, ?DEFAULT_CONFIG_FILE),
-  case ok = setup_korrpcdid(ConfigFile) of
-    ok ->
-      indira:set_option(indira, listen, [{indira_unix, Socket}]),
-      indira:set_option(indira, commander, korrpcdid_commander),
-      indira:start_rec(indira),
-      indira:start_rec(korrpcdid),
-      indira:sleep_forever(),
-      ok; % never reached
+  case read_config(ConfigFile) of
+    {ok, Config} ->
+      case setup_korrpcdid(Config) of
+        ok ->
+          indira:set_option(indira, listen, [{indira_unix, Socket}]),
+          indira:set_option(indira, command, {korrpcdid_command_handler, []}),
+          indira:start_rec(indira),
+          indira:start_rec(korrpcdid),
+          indira:sleep_forever(),
+          ok; % never reached
+        {error, Message} ->
+          {error, ["Configuration error: ", Message]}
+      end;
     {error, Message} ->
-      {error, ["Configuration error: ", Message]}
+      {error, ["Config reading error: ", Message]}
   end;
 
 %% wait for daemon to start completely
@@ -383,153 +389,95 @@ seconds_to_milliseconds(Timeout) when is_integer(Timeout) ->
   {ok, #cmd{}} | help | {error, string()}.
 
 parse_options(Args) ->
-  case parse_options(Args, #cmd{}) of
+  % escript can't into `fun store_arg/3' syntax
+  Fun = fun(M,As,Acc) -> store_arg(M,As,Acc) end,
+  case indira:args_foldg(Fun, #cmd{}, Args) of
     {ok, _Cmd = #cmd{op = undefined}} ->
       {error, "no command supplied"};
     {ok, _Cmd = #cmd{op = cancel_job, args = []}} ->
       {error, "no job specified"};
-    {ok, Cmd = #cmd{op = cancel_job, args = [_JobID]}} ->
-      {ok, Cmd};
-    {ok, Cmd = #cmd{op = list_queue, args = []}} ->
-      NewCmd = Cmd#cmd{op = list_queues},
-      {ok, NewCmd};
-    {ok, Cmd = #cmd{op = list_queue, args = [_Queue]}} ->
-      {ok, Cmd};
     {ok, _Cmd = #cmd{op = cancel_queue, args = []}} ->
       {error, "no queue specified"};
-    {ok, Cmd = #cmd{op = cancel_queue, args = [_Queue]}} ->
+    {ok, Cmd = #cmd{}} ->
       {ok, Cmd};
-    {ok, Cmd = #cmd{op = _, args = []}} ->
-      {ok, Cmd}; % all other command are zero-argument
-    {ok, _Cmd = #cmd{op = _, args = [_ | _]}} ->
-      {error, "too many arguments"};
-    help ->
+    {error, {_Arg, help}} ->
       help;
-    {error, Message} ->
+    {error, {_Arg, Message}} ->
       {error, Message}
   end.
 
-%% @doc Recursive worker for {@link parse_options/1}.
+%% @doc Store an argument in `#cmd{}' structure.
 
--spec parse_options([string()], #cmd{}) ->
-  {ok, #cmd{}} | help | {error, string()}.
+-spec store_arg(SplitMark :: atom(), [string()], #cmd{}) ->
+  #cmd{} | {error, help | iolist()}.
 
-parse_options(["--help" | _Rest] = _Args, _Cmd = #cmd{}) ->
-  help;
+store_arg(single, ["--help" | _], _Cmd) ->
+  {error, help};
+store_arg(single, ["-h" | _], _Cmd) ->
+  {error, help};
 
-parse_options(["--socket=" ++ Path | Rest] = _Args, Cmd = #cmd{}) ->
-  parse_options(["--socket", Path | Rest], Cmd);
-parse_options(["--socket", Path | Rest] = _Args, Cmd = #cmd{}) ->
+store_arg(_, ["--socket", Path | _], Cmd = #cmd{}) ->
   NewCmd = Cmd#cmd{socket = Path},
-  parse_options(Rest, NewCmd);
+  {take, 2, NewCmd};
 
-parse_options(["--config=" ++ File | Rest] = _Args, Cmd = #cmd{}) ->
-  parse_options(["--config", File | Rest], Cmd);
-parse_options(["--config", File | Rest] = _Args, Cmd = #cmd{options = Opts}) ->
-  NewCmd = Cmd#cmd{options = [{"config", File} | Opts]},
-  parse_options(Rest, NewCmd);
+store_arg(_, ["--config", Path | _], Cmd = #cmd{options = Options}) ->
+  NewCmd = Cmd#cmd{
+    options = [{"config", Path} | Options]
+  },
+  {take, 2, NewCmd};
 
-parse_options(["--timeout=" ++ Timeout | Rest] = _Args, Cmd = #cmd{}) ->
-  parse_options(["--timeout", Timeout | Rest], Cmd);
-parse_options(["--timeout", Timeout | Rest] = _Args, Cmd = #cmd{options = Opts}) ->
-  case parse_integer(Timeout) of
-    TimeoutInt when is_integer(TimeoutInt), TimeoutInt > 0 ->
-      NewCmd = Cmd#cmd{options = [{"timeout", TimeoutInt} | Opts]},
-      parse_options(Rest, NewCmd);
-    TimeoutInt when is_integer(TimeoutInt), TimeoutInt =< 0 ->
-      {error, "invalid --timeout: negative"};
-    error ->
-      {error, "invalid --timeout: not an integer"}
-  end;
+store_arg(_, ["--timeout", Timeout | _], Cmd = #cmd{options = Options})
+when hd(Timeout) >= $1, hd(Timeout) =< $9 ->
+  NewCmd = Cmd#cmd{
+    options = [{"timeout", to_int(Timeout)} | Options]
+  },
+  {take, 2, NewCmd};
+store_arg(_, ["--timeout", _Timeout | _], _Cmd) ->
+  {error, "invalid timeout"};
 
-parse_options(["--" ++ _ = Option | _Rest] = _Args, _Cmd = #cmd{}) ->
-  {Opt, _Value} = split_option(Option),
-  {error, "unrecognized option: " ++ Opt};
+store_arg(_, ["--" ++ _ = Option | _], _Cmd) ->
+  {error, ["unknown option: ", Option]};
 
-parse_options(["start" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = start},
-  parse_options(Rest, NewCmd);
-parse_options(["wait-for-start" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = wait_for_start},
-  parse_options(Rest, NewCmd);
-parse_options(["stop" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = stop},
-  parse_options(Rest, NewCmd);
-parse_options(["reload-config" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = reload_config},
-  parse_options(Rest, NewCmd);
+store_arg(_, ["start" | _],          Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = start};
+store_arg(_, ["wait-for-start" | _], Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = wait_for_start};
+store_arg(_, ["stop" | _],           Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = stop};
+store_arg(_, ["reload-config" | _],  Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = reload_config};
 
-parse_options(["list" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = list_jobs},
-  parse_options(Rest, NewCmd);
-parse_options(["cancel" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = cancel_job},
-  parse_options(Rest, NewCmd);
+store_arg(_, ["list" | _],           Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = list_jobs};
+store_arg(_, ["cancel" | _],         Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = cancel_job};
 
-parse_options(["hosts-list" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = list_hosts},
-  parse_options(Rest, NewCmd);
-parse_options(["hosts-refresh" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = refresh_hosts},
-  parse_options(Rest, NewCmd);
+store_arg(_, ["hosts-list" | _],     Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = list_hosts};
+store_arg(_, ["hosts-refresh" | _],  Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = refresh_hosts};
 
-parse_options(["queue-list" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = list_queue},
-  parse_options(Rest, NewCmd);
-parse_options(["queue-cancel" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = cancel_queue},
-  parse_options(Rest, NewCmd);
+store_arg(_, ["queue-list" | _],     Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = list_queue};
+store_arg(_, ["queue-cancel" | _],   Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = cancel_queue};
 
-parse_options(["dist-erl-start" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = dist_start},
-  parse_options(Rest, NewCmd);
-parse_options(["dist-erl-stop" | Rest] = _Args, Cmd = #cmd{op = undefined}) ->
-  NewCmd = Cmd#cmd{op = dist_stop},
-  parse_options(Rest, NewCmd);
+store_arg(_, ["dist-erl-start" | _], Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = dist_start};
+store_arg(_, ["dist-erl-stop" | _],  Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = dist_stop};
 
-parse_options([Arg | _Rest] = _Args, _Cmd = #cmd{op = undefined}) ->
-  {error, "unrecognized command: " ++ Arg};
+store_arg(_, [JobID | _], Cmd = #cmd{op = cancel_job, args = []}) ->
+  _NewCmd = Cmd#cmd{args = [JobID]};
+store_arg(_, [Queue | _], Cmd = #cmd{op = list_queue, args = []}) ->
+  _NewCmd = Cmd#cmd{op = list_queues, args = [Queue]};
+store_arg(_, [Queue | _], Cmd = #cmd{op = cancel_queue, args = []}) ->
+  _NewCmd = Cmd#cmd{args = [Queue]};
 
-parse_options([Arg | Rest] = _Args, Cmd = #cmd{args = ListArgs}) ->
-  NewCmd = Cmd#cmd{args = [Arg | ListArgs]},
-  parse_options(Rest, NewCmd);
-
-parse_options([] = _Args, Cmd = #cmd{args = ListArgs}) ->
-  NewCmd = Cmd#cmd{args = lists:reverse(ListArgs)},
-  {ok, NewCmd}.
-
-%%----------------------------------------------------------
-%% helpers {{{
-
-%% @doc Convert string to an integer.
-
--spec parse_integer(string()) ->
-  integer() | error.
-
-parse_integer(String) ->
-  try
-    list_to_integer(String)
-  catch
-    error:badarg -> error
-  end.
-
-%% @doc Split option and value parts from an option with value (`--foo=bar').
-%%   Simple options (`--foo') get `none' as a value.
-
--spec split_option(string()) ->
-  {string(), string()} | {string(), none}.
-
-split_option(String) ->
-  case string:chr(String, $=) of
-    0 ->
-      {String, none};
-    N when N > 0 ->
-      {Option, [$= | Value]} = lists:split(N - 1, String),
-      {Option, Value}
-  end.
-
-%% }}}
-%%----------------------------------------------------------
+store_arg(_, [Command | _], _Cmd = #cmd{op = undefined}) ->
+  {error, ["unknown command: ", Command]};
+store_arg(_, [_ | _], _Cmd = #cmd{}) ->
+  {error, "too many arguments for this command"}.
 
 %% }}}
 %%----------------------------------------------------------------------------
@@ -537,41 +485,127 @@ split_option(String) ->
 
 %% @doc Setup `korrpcdid' Erlang application with values from config file.
 
--spec setup_korrpcdid(file:filename()) ->
+-spec setup_korrpcdid([{binary(), term()}]) ->
   ok | {error, iolist()}.
 
-setup_korrpcdid(ConfigFile) ->
-  case read_config(ConfigFile) of
-    {ok, Config} ->
-      % TODO: catch configuration errors
-      ok = setup_network(Config),
-      ok = setup_streaming(Config),
-      ok = setup_host_db(Config),
-      ok = setup_logging(Config),
-      ok = setup_erlang(proplists:get_value(<<"erlang">>, Config, [])),
-      ok;
-    {error, Message} ->
-      {error, Message}
+setup_korrpcdid(Config) ->
+  ok = indira:set_option(korrpcdid, listen, []),
+  SetSpecs = [
+    {<<"listen">>,          {korrpcdid, listen}},
+    {<<"stream_directory">>,{korrpcdid, stream_directory}},
+    {<<"default_timeout">>, {korrpcdid, default_timeout}},
+    {<<"max_exec_time">>,   {korrpcdid, max_exec_time}},
+    {<<"host_db_script">>,  {korrpcdid, host_db_script}},
+    {<<"host_db">>,         {korrpcdid, host_db}},
+    {<<"host_db_refresh">>, {korrpcdid, host_db_refresh}},
+    {<<"log_handlers">>,    {korrpcdid, log_handlers}}
+  ],
+  Result = indira:set_env(
+    fun proplists:get_value/2,
+    fun (K,EK,V) -> cfg(K,EK,V) end,
+    Config,
+    SetSpecs
+  ),
+  case Result of
+    ok ->
+      setup_erlang(Config);
+    {error, {Key, _EnvKey, invalid_option_format}} ->
+      {error, ["option ", Key, ": invalid format"]};
+    {error, {Key, _EnvKey, no_listeners}} ->
+      {error, ["option ", Key, ": no listeners defined"]}
   end.
 
-%%----------------------------------------------------------
-%% setup_network() {{{
+%% @doc Setup Erlang configuration.
+%%   This covers distributed Erlang and system events sent through
+%%   {@link error_logger}.
 
-%% @doc Setup network part of `korrpcdid' configuration.
-
--spec setup_network([{binary(), term()}]) ->
+-spec setup_erlang([{binary(), term()}]) ->
   ok | {error, iolist()}.
 
-setup_network(Config) ->
-  case proplists:get_value(<<"listen">>, Config) of
-    [_ | _] = ListenSpecStrings ->
-      ListenSpecs = [parse_listen_spec(S) || S <- ListenSpecStrings],
-      indira:set_option(korrpcdid, listen, ListenSpecs);
-    undefined -> ignore;
-    [] -> ignore;
-    _ -> error
+setup_erlang(TopConfig) ->
+  Config = proplists:get_value(<<"erlang">>, TopConfig, []),
+  NetConfig = [
+    proplists:get_value(K, Config) ||
+    K <- [<<"node_name">>, <<"name_type">>, <<"cookie_file">>]
+  ],
+  NetStart = proplists:get_value(<<"distributed_immediate">>, Config, false),
+  LogHandlers = proplists:get_value(<<"error_logger_handlers">>, Config, []),
+  case NetConfig of
+    [Name, <<"shortnames">>, File] when is_binary(Name), is_binary(File) ->
+      indira:distributed(binary_to_atom(Name, utf8), shortnames, {file, File});
+    [Name, <<"longnames">>, File] when is_binary(Name), is_binary(File) ->
+      indira:distributed(binary_to_atom(Name, utf8), longnames, {file, File});
+    [Name, <<"shortnames">>, undefined] when is_binary(Name) ->
+      indira:distributed(binary_to_atom(Name, utf8), shortnames);
+    [Name, <<"longnames">>, undefined] when is_binary(Name) ->
+      indira:distributed(binary_to_atom(Name, utf8), longnames);
+    [Name, undefined, undefined] when is_binary(Name) ->
+      indira:distributed(binary_to_atom(Name, utf8));
+    _ ->
+      skip
   end,
-  ok.
+  indira:set_option(indira, net_start, NetStart),
+  indira:setup_logging(korrpcdid, []), % clear default log handlers
+  try
+    [error_logger:add_report_handler(binary_to_atom(H, utf8)) ||
+      H <- LogHandlers],
+    ok
+  catch
+    error:{bad_generator, _} ->
+      % `erlang.error_logger_handlers' is not a list
+      {error, "option erlang.error_logger_handlers: not a list"};
+    error:badarg ->
+      % one of the elements in `erlang.error_logger_handlers' is not a string
+      {error, "option erlang.error_logger_handlers: invalid format"}
+  end.
+
+%% }}}
+%%----------------------------------------------------------------------------
+%% config validation {{{
+
+%% @doc Option validator function.
+
+cfg(_Key, _EnvKey, undefined = _Value) ->
+  ignore;
+
+cfg(<<"listen">> = _Key, _EnvKey, Specs) when is_list(Specs) ->
+  try [parse_listen_spec(S) || S <- Specs] of
+    [] -> {error, no_listeners};
+    [_ | _] = Result -> {ok, Result}
+  catch
+    error:_ -> {error, invalid_option_format}
+  end;
+
+cfg(<<"stream_directory">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+cfg(<<"default_timeout">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
+  ok;
+
+cfg(<<"max_exec_time">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
+  ok;
+
+cfg(<<"host_db_script">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+cfg(<<"host_db">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+cfg(<<"host_db_refresh">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
+  ok;
+
+cfg(<<"log_handlers">> = _Key, _EnvKey, Handlers) when is_list(Handlers) ->
+  try
+    {ok, [{binary_to_atom(H, utf8), []} || H <- Handlers]}
+  catch
+    error:_ -> {error, invalid_option_format}
+  end;
+
+cfg(_Key, _EnvKey, _Value) ->
+  {error, invalid_option_format}.
+
+%%----------------------------------------------------------
+%% parsing helpers {{{
 
 %% @doc Convert listening address specification from config file to format
 %%   suitable for application environment.
@@ -582,155 +616,15 @@ setup_network(Config) ->
 parse_listen_spec(Spec) when is_binary(Spec) ->
   % die when the listen specification doesn't match what we expect
   case binary:split(Spec, <<":">>) of
-    [<<"*">>, PortBin] -> {any, bin2int(PortBin)};
-    [AddrBin, PortBin] -> {binary_to_list(AddrBin), bin2int(PortBin)}
+    [<<"*">>, PortBin] -> {any, to_int(PortBin)};
+    [AddrBin, PortBin] -> {binary_to_list(AddrBin), to_int(PortBin)}
   end.
 
-%% @doc Convert string representation of an integer to integer itself.
-
--spec bin2int(binary()) ->
-  pos_integer().
-
-%% only accept positive integers
-bin2int(<<C:8, _/binary>> = Binary) when C >= $1, C =< $9 ->
-  list_to_integer(binary_to_list(Binary)).
-
-%% }}}
-%%----------------------------------------------------------
-%% setup_streaming() {{{
-
-%% @doc Setup RPC stream receiving part of `korrpcdid' configuration.
-
--spec setup_streaming([{binary(), term()}]) ->
-  ok | {error, iolist()}.
-
-setup_streaming(Config) ->
-  case proplists:get_value(<<"stream_directory">>, Config) of
-    StreamDir when is_binary(StreamDir) ->
-      indira:set_option(korrpcdid, stream_directory, binary_to_list(StreamDir));
-    undefined -> ignore;
-    _ -> error
-  end,
-  case proplists:get_value(<<"default_timeout">>, Config) of
-    Timeout when is_integer(Timeout), Timeout > 0 ->
-      indira:set_option(korrpcdid, default_timeout, Timeout);
-    undefined -> ignore;
-    _ -> error
-  end,
-  case proplists:get_value(<<"max_exec_time">>, Config) of
-    MaxExecTime when is_integer(MaxExecTime), MaxExecTime > 0 ->
-      indira:set_option(korrpcdid, max_exec_time, MaxExecTime);
-    undefined -> ignore;
-    _ -> error
-  end,
-  ok.
-
-%% }}}
-%%----------------------------------------------------------
-%% setup_host_db() {{{
-
-%% @doc Setup host registry part of `korrpcdid' configuration.
-
--spec setup_host_db([{binary(), term()}]) ->
-  ok | {error, iolist()}.
-
-setup_host_db(Config) ->
-  case proplists:get_value(<<"host_db_script">>, Config) of
-    HostDBScript when is_binary(HostDBScript) ->
-      indira:set_option(korrpcdid, host_db_script, binary_to_list(HostDBScript));
-    undefined -> ignore;
-    _ -> error
-  end,
-  case proplists:get_value(<<"host_db">>, Config) of
-    HostDB when is_binary(HostDB) ->
-      indira:set_option(korrpcdid, host_db, binary_to_list(HostDB));
-    undefined -> ignore;
-    _ -> error
-  end,
-  case proplists:get_value(<<"host_db_refresh">>, Config) of
-    HostDBRefresh when is_integer(HostDBRefresh), HostDBRefresh > 0 ->
-      indira:set_option(korrpcdid, host_db_refresh, HostDBRefresh);
-    undefined -> ignore;
-    _ -> error
-  end,
-  ok.
-
-%% }}}
-%%----------------------------------------------------------
-%% setup_logging() {{{
-
-%% @doc Setup application logging part of `korrpcdid' configuration.
-
--spec setup_logging([{binary(), term()}]) ->
-  ok | {error, iolist()}.
-
-setup_logging(Config) ->
-  case proplists:get_value(<<"log_handlers">>, Config) of
-    BinLogHandlers when is_list(BinLogHandlers) ->
-      LogHandlers = [parse_log_handler_spec(LH) || LH <- BinLogHandlers],
-      indira:set_option(korrpcdid, log_handlers, LogHandlers);
-    undefined -> ignore;
-    _ -> error
-  end,
-  ok.
-
-parse_log_handler_spec(Spec) when is_binary(Spec) ->
-  ModuleName = binary_to_atom(Spec, utf8),
-  ModuleArgs = [],
-  {ModuleName, ModuleArgs}.
-
-%% }}}
-%%----------------------------------------------------------
-%% setup_erlang() {{{
-
-%% @doc Setup Erlang configuration.
-%%   This covers distributed Erlang and system events sent through
-%%   {@link error_logger}.
-
--spec setup_erlang([{binary(), term()}]) ->
-  ok | {error, iolist()}.
-
-setup_erlang(Config) ->
-  case proplists:get_value(<<"node_name">>, Config) of
-    StreamDir when is_binary(StreamDir) ->
-      'TODO';
-    undefined -> ignore;
-    _ -> error
-  end,
-  case proplists:get_value(<<"name_type">>, Config) of
-    <<"longnames">> ->
-      'TODO';
-    <<"shortnames">> ->
-      'TODO';
-    undefined -> ignore;
-    _ -> error
-  end,
-  case proplists:get_value(<<"cookie_file">>, Config) of
-    CookieFile when is_binary(CookieFile) ->
-      'TODO';
-    undefined -> ignore;
-    _ -> error
-  end,
-  case proplists:get_value(<<"distributed_immediate">>, Config) of
-    true ->
-      'TODO';
-    false ->
-      'TODO';
-    undefined -> ignore;
-    _ -> error
-  end,
-  case proplists:get_value(<<"error_logger_handlers">>, Config) of
-    BinLogHandlers when is_list(BinLogHandlers) ->
-      'TODO';
-    undefined -> ignore;
-    _ -> error
-  end,
-  ok.
-
 %% }}}
 %%----------------------------------------------------------
 
-%%----------------------------------------------------------
+%% }}}
+%%----------------------------------------------------------------------------
 %% parsing config file {{{
 
 %% @doc Read TOML configuration file.
@@ -782,8 +676,24 @@ format_read_error(Reason) ->
   file:format_error(Reason).
 
 %% }}}
+%%----------------------------------------------------------------------------
+
 %%----------------------------------------------------------
+%% helpers {{{
+
+%% @doc Convert string representation of an integer to integer itself.
+%%   Only accepts positive integers.
+
+-spec to_int(binary() | string()) ->
+  pos_integer().
+
+to_int(String) when is_binary(String) ->
+  to_int(binary_to_list(String));
+to_int([C | _] = String) when C >= $1, C =< $9 ->
+  list_to_integer(String).
 
 %% }}}
+%%----------------------------------------------------------
+
 %%----------------------------------------------------------------------------
 %% vim:ft=erlang:foldmethod=marker
