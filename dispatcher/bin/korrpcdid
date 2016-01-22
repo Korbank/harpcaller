@@ -5,7 +5,6 @@
 -define(DEFAULT_CONFIG_FILE, "/etc/korrpcdid/korrpcdid.toml").
 -define(DEFAULT_SOCKET_PATH, "/var/run/korrpcdid/korrpcdid.sock").
 
-%% TODO: pidfile
 %% TODO: reload code
 %% TODO: debug load (`application:start(sasl)')
 -record(cmd, {
@@ -29,7 +28,7 @@ help(IO) ->
   Script = filename:basename(escript:script_name()),
   io:fwrite(IO, "KorRPC dispatcher daemon.~n", []),
   io:fwrite(IO, "Controlling daemon:~n", []),
-  io:fwrite(IO, "  ~s [--socket=...] start [--config=...]~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] start [--config=...] [--pidfile=...]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] wait-for-start [--timeout=...]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] stop [--timeout=...]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] reload-config~n", [Script]),
@@ -87,6 +86,10 @@ cmd(_Cmd = #cmd{op = start, socket = Socket, options = Options}) ->
     {ok, Config} ->
       case setup_korrpcdid(Config) of
         ok ->
+          case proplists:get_value("pidfile", Options) of
+            undefined -> ok;
+            PidFile -> indira:set_option(indira, pidfile, PidFile)
+          end,
           indira:set_option(indira, listen, [{indira_unix, Socket}]),
           indira:set_option(indira, command, {korrpcdid_command_handler, []}),
           indira:start_rec(indira),
@@ -423,6 +426,12 @@ store_arg(_, ["--socket", Path | _], Cmd = #cmd{}) ->
 store_arg(_, ["--config", Path | _], Cmd = #cmd{options = Options}) ->
   NewCmd = Cmd#cmd{
     options = [{"config", Path} | Options]
+  },
+  {take, 2, NewCmd};
+
+store_arg(_, ["--pidfile", Path | _], Cmd = #cmd{options = Options}) ->
+  NewCmd = Cmd#cmd{
+    options = [{"pidfile", Path} | Options]
   },
   {take, 2, NewCmd};
 
