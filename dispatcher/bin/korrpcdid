@@ -106,18 +106,17 @@ cmd(_Cmd = #cmd{op = start, socket = Socket, options = Options}) ->
 %% wait for daemon to start completely
 cmd(_Cmd = #cmd{op = wait_for_start, socket = Socket, options = Options}) ->
   Timeout = proplists:get_value("timeout", Options, infinity),
-  case retry_send_command(Socket, wait_for_start, Timeout) of
-    {ok, _Reply} ->
-      ok;
-    {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+  Command = korrpcdid_command_handler:command_wait_for_start(),
+  case retry_send_command(Socket, Command, Timeout) of
+    {ok, _Reply} -> ok;
+    {error, Reason} -> {error, format_send_error(Reason)}
   end;
 
 %% stop the daemon
 cmd(_Cmd = #cmd{op = stop, socket = Socket, options = Options}) ->
   Timeout = proplists:get_value("timeout", Options, infinity),
-  case send_command(Socket, stop, Timeout) of
+  Command = korrpcdid_command_handler:command_stop(),
+  case send_command(Socket, Command, Timeout) of
     {ok, [{<<"pid">>, DaemonPID}, {<<"result">>, <<"ok">>}] = _Reply} ->
       % reply to `stop' command got through before the Erlang system shut
       % down; print the daemon's PID and let the caller wait for it to
@@ -126,121 +125,108 @@ cmd(_Cmd = #cmd{op = stop, socket = Socket, options = Options}) ->
       io:fwrite("~s~n", [DaemonPID]),
       ok;
     {error, closed} ->
-      % this should never happen, but just in case the daemon's Erlang system
-      % shut down without allowing the reply to pass through, handle this
-      % situation as well
+      % this normally shouldn't happen, but just in case the daemon's Erlang
+      % system shut down without allowing the reply to pass through, handle
+      % this situation as well
       ok;
     {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+      {error, format_send_error(Reason)}
   end;
 
 %% order the daemon to reload its config
 cmd(_Cmd = #cmd{op = reload_config, socket = Socket}) ->
-  case send_command(Socket, reload_config) of
-    {ok, _Reply} ->
-      ok;
-    {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+  Command = korrpcdid_command_handler:command_reload_config(),
+  case send_command(Socket, Command) of
+    {ok, _Reply} -> ok;
+    {error, Reason} -> {error, format_send_error(Reason)}
   end;
 
 %% list RPC jobs the daemon currently runs
 cmd(_Cmd = #cmd{op = list_jobs, socket = Socket}) ->
-  case send_command(Socket, list_jobs) of
+  Command = korrpcdid_command_handler:command_list_jobs(),
+  case send_command(Socket, Command) of
     {ok, Reply} ->
       io:fwrite("# jobs:~n"),
       io:fwrite("% ~1024p~n", [Reply]),
       ok;
     {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+      {error, format_send_error(Reason)}
   end;
 
 %% cancel specific RPC job
 cmd(_Cmd = #cmd{op = cancel_job, socket = Socket, args = [JobID]}) ->
-  case send_command(Socket, {cancel_job, job, JobID}) of
-    {ok, _Reply} ->
-      ok;
-    {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+  Command = korrpcdid_command_handler:cancel_job(JobID),
+  case send_command(Socket, Command) of
+    {ok, _Reply} -> ok;
+    {error, Reason} -> {error, format_send_error(Reason)}
   end;
 
 %% list hosts the daemon knows about
 cmd(_Cmd = #cmd{op = list_hosts, socket = Socket}) ->
-  case send_command(Socket, list_hosts) of
+  Command = korrpcdid_command_handler:command_list_hosts(),
+  case send_command(Socket, Command) of
     {ok, Reply} ->
       io:fwrite("# hosts:~n"),
       io:fwrite("% ~1024p~n", [Reply]),
       ok;
     {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+      {error, format_send_error(Reason)}
   end;
 
 %% order the daemon to refresh its known hosts registry
 cmd(_Cmd = #cmd{op = refresh_hosts, socket = Socket}) ->
-  case send_command(Socket, refresh_hosts) of
-    {ok, _Reply} ->
-      ok;
-    {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+  Command = korrpcdid_command_handler:command_refresh_hosts(),
+  case send_command(Socket, Command) of
+    {ok, _Reply} -> ok;
+    {error, Reason} -> {error, format_send_error(Reason)}
   end;
 
 %% list job queues daemon currently has defined (non-empty)
 cmd(_Cmd = #cmd{op = list_queues, socket = Socket}) ->
-  case send_command(Socket, list_queues) of
+  Command = korrpcdid_command_handler:command_list_queues(),
+  case send_command(Socket, Command) of
     {ok, Reply} ->
       io:fwrite("# queues:~n"),
       io:fwrite("% ~1024p~n", [Reply]),
       ok;
     {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+      {error, format_send_error(Reason)}
   end;
 
 %% list specific job queue
 cmd(_Cmd = #cmd{op = list_queue, socket = Socket, args = [Queue]}) ->
-  case send_command(Socket, {list_queue, 'queue', Queue}) of
+  Command = korrpcdid_command_handler:command_list_queue(Queue),
+  case send_command(Socket, Command) of
     {ok, Reply} ->
       io:fwrite("# queue ~s:~n", [Queue]),
       io:fwrite("% ~1024p~n", [Reply]),
       ok;
     {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+      {error, format_send_error(Reason)}
   end;
 
 %% clear all the jobs from specific queue
 cmd(_Cmd = #cmd{op = cancel_queue, socket = Socket, args = [Queue]}) ->
-  case send_command(Socket, {cancel_queue, 'queue', Queue}) of
-    {ok, _Reply} ->
-      ok;
-    {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+  Command = korrpcdid_command_handler:command_cancel_queue(Queue),
+  case send_command(Socket, Command) of
+    {ok, _Reply} -> ok;
+    {error, Reason} -> {error, format_send_error(Reason)}
   end;
 
 %% order the daemon to setup its node for distributed Erlang environment
 cmd(_Cmd = #cmd{op = dist_start, socket = Socket}) ->
-  case send_command(Socket, dist_start) of
-    {ok, _Reply} ->
-      ok;
-    {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+  Command = korrpcdid_command_handler:command_dist_start(),
+  case send_command(Socket, Command) of
+    {ok, _Reply} -> ok;
+    {error, Reason} -> {error, format_send_error(Reason)}
   end;
 
 %% order the daemon to tear down its distributed Erlang part
 cmd(_Cmd = #cmd{op = dist_stop, socket = Socket}) ->
-  case send_command(Socket, dist_stop) of
-    {ok, _Reply} ->
-      ok;
-    {error, Reason} ->
-      Message = io_lib:format("communication error: ~1024p", [Reason]),
-      {error, Message}
+  Command = korrpcdid_command_handler:command_dist_stop(),
+  case send_command(Socket, Command) of
+    {ok, _Reply} -> ok;
+    {error, Reason} -> {error, format_send_error(Reason)}
   end.
 
 %%----------------------------------------------------------------------------
@@ -268,10 +254,10 @@ send_command(Socket, Command) ->
   {ok, term()} | {error, term()}.
 
 send_command(Socket, Command, Timeout) ->
-  Line = encode_command(Command),
+  {ok, Line} = indira_json:encode(Command),
   case connect_send_recv_line(Socket, Line, seconds_to_milliseconds(Timeout)) of
     {ok, ReplyLine} ->
-      Reply = decode_command_reply(ReplyLine),
+      {ok, Reply} = indira_json:decode(ReplyLine),
       {ok, Reply};
     {error, Reason} ->
       {error, Reason} % TODO: format `Reason'
@@ -345,33 +331,6 @@ connect_send_recv_line(SocketPath, Line, Timeout) ->
       {error, Reason}
   end.
 
-%% @doc Encode command as a JSON line.
-
--spec encode_command(atom() |
-                     {Cmd :: atom(), ArgName :: atom() | string() | binary(),
-                      ArgValue :: atom() | string() | binary()}) ->
-  iolist().
-
-encode_command(Command) when is_atom(Command) ->
-  {ok, Line} = korrpc_json:encode([{command, Command}]),
-  Line;
-encode_command({C, ArgName, ArgValue} = _Command) when is_list(ArgName) ->
-  encode_command({C, list_to_binary(ArgName), ArgValue});
-encode_command({C, ArgName, ArgValue} = _Command) when is_list(ArgValue) ->
-  encode_command({C, ArgName, list_to_binary(ArgValue)});
-encode_command({C, ArgName, ArgValue} = _Command) ->
-  {ok, Line} = korrpc_json:encode([{command, C}, {ArgName, ArgValue}]),
-  Line.
-
-%% @doc Decode response to an earlier sent command to jsx-like structure.
-
--spec decode_command_reply(string() | binary()) ->
-  term().
-
-decode_command_reply(ReplyLine) ->
-  {ok, Reply} = korrpc_json:decode(ReplyLine), % Indira won't fail us here
-  Reply.
-
 %% @doc Convert timeout specified in seconds to a timeout in milliseconds.
 
 -spec seconds_to_milliseconds(timeout()) ->
@@ -381,6 +340,16 @@ seconds_to_milliseconds(infinity = _Timeout) ->
   infinity;
 seconds_to_milliseconds(Timeout) when is_integer(Timeout) ->
   Timeout * 1000.
+
+%% @doc Format a connect/send/recv error.
+
+-spec format_send_error(term()) ->
+  iolist().
+
+format_send_error(enoent = _Reason) ->
+  "communication error: socket doesn't exist";
+format_send_error(Reason) ->
+  io_lib:format("communication error: ~1024p", [Reason]).
 
 %% }}}
 %%----------------------------------------------------------------------------
