@@ -53,7 +53,7 @@
 -type call_option() ::
     {timeout, timeout()}
   | {max_exec_time, timeout()}
-  | {'queue', korrpcdid_call_queue:queue_name() |
+  | {queue, korrpcdid_call_queue:queue_name() |
               {korrpcdid_call_queue:queue_name(),
                 Concurrency :: pos_integer()}}.
 
@@ -276,7 +276,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
         {QueueName, Concurrency} ->
           % enqueue and wait for a message
           korrpcdid_log:info(?LOG_CAT, "waiting for a queue",
-                             [{job, {str, JobID}}, {'queue', QueueName}]),
+                             [{job, {str, JobID}}, {queue, QueueName}]),
           QRef = korrpcdid_call_queue:enqueue(QueueName, Concurrency),
           NewState = FilledState#state{
             call = {queued, QRef}
@@ -445,7 +445,7 @@ decode_options(Options) ->
   {ok, TA} = application:get_env(default_timeout),
   E = proplists:get_value(max_exec_time, Options),
   {ok, EA} = application:get_env(max_exec_time),
-  Queue = case proplists:get_value('queue', Options) of
+  Queue = case proplists:get_value(queue, Options) of
     undefined ->
       undefined;
     {QueueName, Concurrency} when is_integer(Concurrency), Concurrency > 0 ->

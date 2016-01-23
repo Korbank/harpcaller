@@ -116,7 +116,7 @@ start_link() ->
 %% @doc Initialize event handler.
 
 init(_Args) ->
-  Queue = ets:new('queue', [bag]),
+  Queue = ets:new(queue, [bag]),
   QueueOpts = ets:new(queue_opts, [set, {keypos, #qopts.name}]),
   QueuePids = ets:new(queue_pids, [set, {keypos, #qpid.key}]),
   State = #state{

@@ -138,7 +138,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       end,
       QueueOpts = case Queue of
         undefined -> [];
-        {QueueName, Concurrency} -> [{'queue', {QueueName, Concurrency}}]
+        {QueueName, Concurrency} -> [{queue, {QueueName, Concurrency}}]
       end,
       {ok, _Pid, JobID} =
         korrpcdid_caller:call(Proc, Args, Host, QueueOpts ++ Options),
