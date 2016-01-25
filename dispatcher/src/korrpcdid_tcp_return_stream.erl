@@ -297,6 +297,11 @@ format_result({error, {Type, Message, Data}} = _Result)
 when is_binary(Type), is_binary(Message) ->
   [{<<"error">>,
     [{<<"type">>, Type}, {<<"message">>, Message}, {<<"data">>, Data}]}];
+format_result({error, closed} = _Result) ->
+  [{<<"error">>, [
+    {<<"type">>, <<"closed">>},
+    {<<"message">>, <<"connection closed unexpectedly">>}
+  ]}];
 format_result({error, Reason} = _Result) when is_atom(Reason) ->
   [{<<"error">>, [
     {<<"type">>, atom_to_binary(Reason, utf8)},
