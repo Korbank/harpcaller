@@ -107,21 +107,21 @@ cmd(_Cmd = #cmd{op = start, socket = Socket, options = Options}) ->
 cmd(_Cmd = #cmd{op = wait_for_start, socket = Socket, options = Options}) ->
   Timeout = proplists:get_value("timeout", Options, infinity),
   Command = korrpcdid_command_handler:command_wait_for_start(),
-  case retry_send_command(Socket, Command, Timeout) of
-    {ok, _Reply} -> ok;
-    {error, Reason} -> {error, format_send_error(Reason)}
+  case indira:retry_send_one_command(indira_unix, Socket, Command, Timeout) of
+    {ok, Reply} ->
+      korrpcdid_command_handler:reply_wait_for_start(Reply);
+    {error, Reason} ->
+      {error, format_send_error(Reason)}
   end;
 
 %% stop the daemon
 cmd(_Cmd = #cmd{op = stop, socket = Socket, options = Options}) ->
   Timeout = proplists:get_value("timeout", Options, infinity),
   Command = korrpcdid_command_handler:command_stop(),
-  case send_command(Socket, Command, Timeout) of
-    {ok, [{<<"pid">>, DaemonPID}, {<<"result">>, <<"ok">>}] = _Reply} ->
-      % reply to `stop' command got through before the Erlang system shut
-      % down; print the daemon's PID and let the caller wait for it to
-      % disappear
-      % TODO: only print PID on request
+  case indira:send_one_command(indira_unix, Socket, Command, Timeout) of
+    {ok, Reply} ->
+      % TODO: handle a possible error in parsing a reply
+      {ok, DaemonPID} = korrpcdid_command_handler:reply_stop(Reply),
       io:fwrite("~s~n", [DaemonPID]),
       ok;
     {error, closed} ->
@@ -135,223 +135,125 @@ cmd(_Cmd = #cmd{op = stop, socket = Socket, options = Options}) ->
 
 %% order the daemon to reload its config
 cmd(_Cmd = #cmd{op = reload_config, socket = Socket}) ->
-  Command = korrpcdid_command_handler:command_reload_config(),
-  case send_command(Socket, Command) of
-    {ok, _Reply} -> ok;
-    {error, Reason} -> {error, format_send_error(Reason)}
-  end;
+  send_command(
+    Socket,
+    korrpcdid_command_handler:command_reload_config(),
+    fun korrpcdid_command_handler:reply_reload_config/1
+  );
 
 %% list RPC jobs the daemon currently runs
 cmd(_Cmd = #cmd{op = list_jobs, socket = Socket}) ->
   Command = korrpcdid_command_handler:command_list_jobs(),
-  case send_command(Socket, Command) of
-    {ok, Reply} ->
+  ResultFun = fun korrpcdid_command_handler:reply_list_jobs/1,
+  case send_command(Socket, Command, ResultFun) of
+    {ok, Jobs} ->
       io:fwrite("# jobs:~n"),
-      io:fwrite("% ~1024p~n", [Reply]),
+      io:fwrite("% ~1024p~n", [Jobs]),
       ok;
-    {error, Reason} ->
-      {error, format_send_error(Reason)}
+    {error, Message} ->
+      {error, Message}
   end;
 
 %% cancel specific RPC job
 cmd(_Cmd = #cmd{op = cancel_job, socket = Socket, args = [JobID]}) ->
-  Command = korrpcdid_command_handler:cancel_job(JobID),
-  case send_command(Socket, Command) of
-    {ok, _Reply} -> ok;
-    {error, Reason} -> {error, format_send_error(Reason)}
-  end;
+  send_command(
+    Socket,
+    korrpcdid_command_handler:command_cancel_job(JobID),
+    fun korrpcdid_command_handler:reply_cancel_job/1
+  );
 
 %% list hosts the daemon knows about
 cmd(_Cmd = #cmd{op = list_hosts, socket = Socket}) ->
   Command = korrpcdid_command_handler:command_list_hosts(),
-  case send_command(Socket, Command) of
-    {ok, Reply} ->
+  ResultFun = fun korrpcdid_command_handler:reply_list_hosts/1,
+  case send_command(Socket, Command, ResultFun) of
+    {ok, Hosts} ->
       io:fwrite("# hosts:~n"),
-      io:fwrite("% ~1024p~n", [Reply]),
+      io:fwrite("% ~1024p~n", [Hosts]),
       ok;
-    {error, Reason} ->
-      {error, format_send_error(Reason)}
+    {error, Message} ->
+      {error, Message}
   end;
 
 %% order the daemon to refresh its known hosts registry
 cmd(_Cmd = #cmd{op = refresh_hosts, socket = Socket}) ->
-  Command = korrpcdid_command_handler:command_refresh_hosts(),
-  case send_command(Socket, Command) of
-    {ok, _Reply} -> ok;
-    {error, Reason} -> {error, format_send_error(Reason)}
-  end;
+  send_command(
+    Socket,
+    korrpcdid_command_handler:command_refresh_hosts(),
+    fun korrpcdid_command_handler:reply_refresh_hosts/1
+  );
 
 %% list job queues daemon currently has defined (non-empty)
 cmd(_Cmd = #cmd{op = list_queues, socket = Socket}) ->
   Command = korrpcdid_command_handler:command_list_queues(),
-  case send_command(Socket, Command) of
-    {ok, Reply} ->
+  ResultFun = fun korrpcdid_command_handler:reply_list_queues/1,
+  case send_command(Socket, Command, ResultFun) of
+    {ok, Queues} ->
       io:fwrite("# queues:~n"),
-      io:fwrite("% ~1024p~n", [Reply]),
+      io:fwrite("% ~1024p~n", [Queues]),
       ok;
-    {error, Reason} ->
-      {error, format_send_error(Reason)}
+    {error, Message} ->
+      {error, Message}
   end;
 
 %% list specific job queue
 cmd(_Cmd = #cmd{op = list_queue, socket = Socket, args = [Queue]}) ->
   Command = korrpcdid_command_handler:command_list_queue(Queue),
-  case send_command(Socket, Command) of
-    {ok, Reply} ->
+  ResultFun = fun korrpcdid_command_handler:reply_list_queue/1,
+  case send_command(Socket, Command, ResultFun) of
+    {ok, Jobs} ->
       io:fwrite("# queue ~s:~n", [Queue]),
-      io:fwrite("% ~1024p~n", [Reply]),
+      io:fwrite("% ~1024p~n", [Jobs]),
       ok;
-    {error, Reason} ->
-      {error, format_send_error(Reason)}
+    {error, Message} ->
+      {error, Message}
   end;
 
 %% clear all the jobs from specific queue
 cmd(_Cmd = #cmd{op = cancel_queue, socket = Socket, args = [Queue]}) ->
-  Command = korrpcdid_command_handler:command_cancel_queue(Queue),
-  case send_command(Socket, Command) of
-    {ok, _Reply} -> ok;
-    {error, Reason} -> {error, format_send_error(Reason)}
-  end;
+  send_command(
+    Socket,
+    korrpcdid_command_handler:command_cancel_queue(Queue),
+    fun korrpcdid_command_handler:reply_cancel_queue/1
+  );
 
 %% order the daemon to setup its node for distributed Erlang environment
 cmd(_Cmd = #cmd{op = dist_start, socket = Socket}) ->
-  Command = korrpcdid_command_handler:command_dist_start(),
-  case send_command(Socket, Command) of
-    {ok, _Reply} -> ok;
-    {error, Reason} -> {error, format_send_error(Reason)}
-  end;
+  send_command(
+    Socket,
+    korrpcdid_command_handler:command_dist_start(),
+    fun korrpcdid_command_handler:reply_dist_start/1
+  );
 
 %% order the daemon to tear down its distributed Erlang part
 cmd(_Cmd = #cmd{op = dist_stop, socket = Socket}) ->
-  Command = korrpcdid_command_handler:command_dist_stop(),
-  case send_command(Socket, Command) of
-    {ok, _Reply} -> ok;
+  send_command(
+    Socket,
+    korrpcdid_command_handler:command_dist_stop(),
+    fun korrpcdid_command_handler:reply_dist_stop/1
+  ).
+
+%%----------------------------------------------------------
+%% helpers {{{
+
+-spec send_command(string(), indira_json:struct(), fun()) ->
+  {ok, indira_json:struct()} | {error, iolist()}.
+
+send_command(Socket, Command, ReplyParseFun) ->
+  case indira:send_one_command(indira_unix, Socket, Command) of
+    {ok, Reply} -> ReplyParseFun(Reply);
     {error, Reason} -> {error, format_send_error(Reason)}
   end.
-
-%%----------------------------------------------------------------------------
-%% control socket commands {{{
-
-%% @doc Send a command through specified socket to a running daemon.
-%%
-%%   `Command' is a term suitable for {@link encode_command/1}.
-%%
-%%   Function waits infinitely for a response.
-
--spec send_command(file:filename(), term()) ->
-  {ok, term()} | {error, term()}.
-
-send_command(Socket, Command) ->
-  send_command(Socket, Command, infinity).
-
-%% @doc Send a command through specified socket to a running daemon.
-%%
-%%   `Command' is a term suitable for {@link encode_command/1}.
-%%
-%%   Function waits `Timeout' seconds for a response.
-
--spec send_command(file:filename(), term(), timeout()) ->
-  {ok, term()} | {error, term()}.
-
-send_command(Socket, Command, Timeout) ->
-  {ok, Line} = indira_json:encode(Command),
-  case connect_send_recv_line(Socket, Line, seconds_to_milliseconds(Timeout)) of
-    {ok, ReplyLine} ->
-      {ok, Reply} = indira_json:decode(ReplyLine),
-      {ok, Reply};
-    {error, Reason} ->
-      {error, Reason} % TODO: format `Reason'
-  end.
-
-%% @doc Send a command through specified socket to a running daemon, retrying
-%%   if the socket doesn't exist yet.
-%%
-%%   `Command' is a term suitable for {@link encode_command/1}.
-%%
-%%   Function waits `Timeout' seconds for the socket to appear, and then
-%%   another `Timeout' seconds for a response.
-
--spec retry_send_command(file:filename(), term(), timeout()) ->
-  {ok, term()} | {error, term()}.
-
-retry_send_command(Socket, Command, Timeout) ->
-  TimeoutRef = make_ref(),
-  case Timeout of
-    _ when is_integer(Timeout) ->
-      % don't need to remember this timer, as it's just one of them, and the
-      % Erlang machine will halt
-      _Ref = erlang:send_after(Timeout * 1000, self(), {timeout, TimeoutRef});
-    infinity ->
-      ok
-  end,
-  retry_send_command(Socket, Command, Timeout, TimeoutRef).
-
-%% @doc Worker for {@link retry_send_command/3}.
-
--spec retry_send_command(file:filename(), term(), timeout(), reference()) ->
-  {ok, term()} | {error, term()}.
-
-retry_send_command(Socket, Command, Timeout, TimeoutRef) ->
-  % try connecting to the socket
-  % if it succeeds, excellent
-  % if it fails because the socket doesn't exist (yet), try after 100ms (watch
-  % for requested timeout)
-  % if it fails for any reason other than the socket doesn't exist (yet), it's
-  % a permanent failure
-  case send_command(Socket, Command, Timeout) of
-    {ok, Reply} ->
-      {ok, Reply};
-    {error, enoent} ->
-      receive
-        {timeout, TimeoutRef} ->
-          {error, timeout}
-      after 100 ->
-          retry_send_command(Socket, Command, Timeout, TimeoutRef)
-      end;
-    {error, Reason} ->
-      {error, Reason}
-  end.
-
-%% @doc Connect to specified socket, send a line, read a line, and close
-%%   socket.
-%%
-%%   Waits `Timeout' milliseconds for a response.
-
--spec connect_send_recv_line(file:filename(), iolist(), timeout()) ->
-  {ok, binary()} | {error, term()}.
-
-connect_send_recv_line(SocketPath, Line, Timeout) ->
-  case indira_af_unix:connect(SocketPath, [{active, false}]) of
-    {ok, Socket} ->
-      ok = indira_af_unix:send(Socket, [Line, $\n]),
-      RecvResult = indira_af_unix:recv(Socket, 0, Timeout),
-      ok = indira_af_unix:close(Socket),
-      RecvResult;
-    {error, Reason} ->
-      {error, Reason}
-  end.
-
-%% @doc Convert timeout specified in seconds to a timeout in milliseconds.
-
--spec seconds_to_milliseconds(timeout()) ->
-  timeout().
-
-seconds_to_milliseconds(infinity = _Timeout) ->
-  infinity;
-seconds_to_milliseconds(Timeout) when is_integer(Timeout) ->
-  Timeout * 1000.
-
-%% @doc Format a connect/send/recv error.
 
 -spec format_send_error(term()) ->
   iolist().
 
-format_send_error(enoent = _Reason) ->
-  "communication error: socket doesn't exist";
-format_send_error(Reason) ->
-  io_lib:format("communication error: ~1024p", [Reason]).
+format_send_error(timeout = _Reason) -> "";
+format_send_error(Reason) -> inet:format_error(Reason).
 
 %% }}}
+%%----------------------------------------------------------
+
 %%----------------------------------------------------------------------------
 %% parse command line arguments {{{
 
