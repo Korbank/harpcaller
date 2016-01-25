@@ -30,13 +30,97 @@
 %%% gen_indira_command callbacks
 %%%---------------------------------------------------------------------------
 
+%%----------------------------------------------------------
+%% daemon control
+
 handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
   init:stop(),
   [{result, ok}, {pid, list_to_binary(os:getpid())}];
 
+handle_command([{<<"command">>, <<"wait_for_start">>}] = _Command, _Args) ->
+  wait_for_start(),
+  [{result, ok}];
+
+handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
+  [{error, <<"command not implemented yet">>}];
+
+%%----------------------------------------------------------
+%% RPC job control
+
+handle_command([{<<"command">>, <<"list_jobs">>}] = _Command, _Args) ->
+  Jobs = list_jobs_info(),
+  [{result, ok}, {jobs, Jobs}];
+
+handle_command([{<<"command">>, <<"cancel_job">>},
+                {<<"job">>, JobID}] = _Command, _Args) ->
+  case korrpcdid_caller:cancel(binary_to_list(JobID)) of
+    ok -> [{result, ok}];
+    undefined -> [{result, no_such_job}]
+  end;
+
+%%----------------------------------------------------------
+%% hosts registry control
+
+handle_command([{<<"command">>, <<"list_hosts">>}] = _Command, _Args) ->
+  [{error, <<"command not implemented yet">>}];
+
+handle_command([{<<"command">>, <<"refresh_hosts">>}] = _Command, _Args) ->
+  korrpcdid_hostdb:refresh(),
+  [{result, ok}];
+
+%%----------------------------------------------------------
+%% queues control
+
+handle_command([{<<"command">>, <<"list_queues">>}] = _Command, _Args) ->
+  % [{result, ok}, {queues, [...]}]
+  [{error, <<"command not implemented yet">>}];
+
+handle_command([{<<"command">>, <<"list_queue">>},
+                {<<"queue">>, _Queue}] = _Command, _Args) ->
+  % Jobs = list_jobs_info(Queue),
+  % [{result, ok}, {jobs, Jobs}]
+  [{error, <<"command not implemented yet">>}];
+
+handle_command([{<<"command">>, <<"cancel_queue">>},
+                {<<"queue">>, Queue}] = _Command, _Args) ->
+  korrpcdid_call_queue:cancel(Queue),
+  [{result, ok}];
+
+%%----------------------------------------------------------
+%% Erlang networking control
+
+handle_command([{<<"command">>, <<"dist_start">>}] = _Command, _Args) ->
+  % TODO: handle errors
+  ok = indira:distributed_start(),
+  [{result, ok}];
+
+handle_command([{<<"command">>, <<"dist_stop">>}] = _Command, _Args) ->
+  % TODO: handle errors
+  ok = indira:distributed_stop(),
+  [{result, ok}];
+
 handle_command(Command, _Args) ->
   io:fwrite("got command ~p~n", [Command]),
   [{error, <<"unsupported command">>}].
+
+%%----------------------------------------------------------
+
+wait_for_start() ->
+  case whereis(korrpcdid_sup) of
+    Pid when is_pid(Pid) -> ok;
+    undefined -> timer:sleep(100), wait_for_start()
+  end.
+
+list_jobs_info() ->
+  % TODO: more job info (queued, started, host, function, args)
+  % TODO: catch errors from `korrpcdid_caller:job_id()' when task terminated
+  %   between listing processes and checking out their info
+  _Result = [
+    list_to_binary(korrpcdid_caller:job_id(Pid)) ||
+    {_,Pid,_,_} <- supervisor:which_children(korrpcdid_caller_sup)
+  ].
+
+%%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
 
@@ -115,22 +199,18 @@ reply_list_queues([{<<"queues">>, Queues}, {<<"result">>, <<"ok">>}] = _Reply) -
 reply_list_queues(Reply) ->
   {error, invalid_reply(Reply)}.
 
-command_list_queue(Queue) when is_list(Queue) ->
-  command_list_queue(list_to_binary(Queue));
-command_list_queue(Queue) when is_binary(Queue) ->
-  [{command, list_queue}, {queue, Queue}].
+command_list_queue(Queue) ->
+  {ok, QueueStruct} = indira_json:decode(Queue),
+  [{command, list_queue}, {queue, QueueStruct}].
 
 reply_list_queue([{<<"jobs">>, Jobs}, {<<"result">>, <<"ok">>}] = _Reply) ->
   {ok, Jobs};
-reply_list_queue([{<<"result">>, <<"no_such_queue">>}] = _Reply) ->
-  {error, "no such queue"};
 reply_list_queue(Reply) ->
   {error, invalid_reply(Reply)}.
 
-command_cancel_queue(Queue) when is_list(Queue) ->
-  command_cancel_queue(list_to_binary(Queue));
 command_cancel_queue(Queue) ->
-  [{command, cancel_queue}, {queue, Queue}].
+  {ok, QueueStruct} = indira_json:decode(Queue),
+  [{command, cancel_queue}, {queue, QueueStruct}].
 
 reply_cancel_queue([{<<"result">>, <<"ok">>}] = _Reply) -> ok;
 reply_cancel_queue(Reply) -> {error, invalid_reply(Reply)}.
