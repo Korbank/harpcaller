@@ -73,8 +73,8 @@ handle_command([{<<"command">>, <<"refresh_hosts">>}] = _Command, _Args) ->
 %% queues control
 
 handle_command([{<<"command">>, <<"list_queues">>}] = _Command, _Args) ->
-  % [{result, ok}, {queues, [...]}]
-  [{error, <<"command not implemented yet">>}];
+  {ok, Queues} = korrpcdid_call_queue:list(),
+  [{result, ok}, {queues, Queues}];
 
 handle_command([{<<"command">>, <<"list_queue">>},
                 {<<"queue">>, Queue}] = _Command, _Args) ->

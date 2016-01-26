@@ -194,7 +194,7 @@ cmd(_Cmd = #cmd{op = list_queues, socket = Socket}) ->
   case send_command(Socket, Command, ResultFun) of
     {ok, Queues} ->
       io:fwrite("# queues:~n"),
-      [io:fwrite("%  - ~1024p~n", [Q]) || Q <- Queues],
+      [io:fwrite("~s~n", [format_queue_name(Q)]) || Q <- Queues],
       ok;
     {error, Message} ->
       {error, Message}
@@ -578,6 +578,10 @@ format_job_info(JobInfo) ->
 
 format_host_info(HostInfo) ->
   {ok, JSON} = indira_json:encode(HostInfo),
+  JSON.
+
+format_queue_name(QueueName) ->
+  {ok, JSON} = indira_json:encode(QueueName),
   JSON.
 
 %% @doc Convert string representation of an integer to integer itself.
