@@ -1,0 +1,29 @@
+Things that would be nice to have, but are not critical for production at this
+time:
+
+== job result storage and retention ==
+
+  * listing recorded jobs (including terminated ones)
+  * purging old jobs records
+  * logrotate script
+  * timestamps in stream logs
+
+== communication with dispatcher ==
+
+  * SSL listening sockets
+  * client authentication
+  * add "enqueued" to possible returned values ("get_result", "read_stream")
+  * list queues (administrative command, similar in intent to "cancel queue",
+    i.e. executed on best effort basis)
+  * list queue content (user command, similar in intent to "call", i.e. atomic
+    and reliable)
+
+== code internals ==
+
+  * untangle job ID in korrpcdid_caller:call()
+  * korrpcdid_caller and korrpcdid_tcp_return_{result,stream}: refactoring
+  * tcp_worker: list of modules
+    * list all used modules, or
+    * set `dynamic' and handle `get_modules' system command (how?)
+    * how does code upgrade work for process that needs to upgrade module it
+      doesn't use?
