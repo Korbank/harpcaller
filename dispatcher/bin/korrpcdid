@@ -347,7 +347,7 @@ store_arg(_, ["hosts-refresh" | _],  Cmd = #cmd{op = undefined}) ->
   _NewCmd = Cmd#cmd{op = refresh_hosts};
 
 store_arg(_, ["queue-list" | _],     Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = list_queue};
+  _NewCmd = Cmd#cmd{op = list_queues};
 store_arg(_, ["queue-cancel" | _],   Cmd = #cmd{op = undefined}) ->
   _NewCmd = Cmd#cmd{op = cancel_queue};
 
@@ -358,8 +358,8 @@ store_arg(_, ["dist-erl-stop" | _],  Cmd = #cmd{op = undefined}) ->
 
 store_arg(_, [JobID | _], Cmd = #cmd{op = cancel_job, args = []}) ->
   _NewCmd = Cmd#cmd{args = [JobID]};
-store_arg(_, [Queue | _], Cmd = #cmd{op = list_queue, args = []}) ->
-  _NewCmd = Cmd#cmd{op = list_queues, args = [Queue]};
+store_arg(_, [Queue | _], Cmd = #cmd{op = list_queues, args = []}) ->
+  _NewCmd = Cmd#cmd{op = list_queue, args = [Queue]};
 store_arg(_, [Queue | _], Cmd = #cmd{op = cancel_queue, args = []}) ->
   _NewCmd = Cmd#cmd{args = [Queue]};
 
