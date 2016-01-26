@@ -30,7 +30,7 @@ help(IO) ->
   io:fwrite(IO, "Controlling daemon:~n", []),
   io:fwrite(IO, "  ~s [--socket=...] start [--config=...] [--pidfile=...]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] wait-for-start [--timeout=...]~n", [Script]),
-  io:fwrite(IO, "  ~s [--socket=...] stop [--timeout=...]~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] stop [--timeout=...] [--print-pid]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] reload-config~n", [Script]),
   io:fwrite(IO, "Jobs:~n", []),
   io:fwrite(IO, "  ~s [--socket=...] list~n", [Script]),
@@ -120,9 +120,13 @@ cmd(_Cmd = #cmd{op = stop, socket = Socket, options = Options}) ->
   Command = korrpcdid_command_handler:command_stop(),
   case indira:send_one_command(indira_unix, Socket, Command, Timeout) of
     {ok, Reply} ->
-      % TODO: handle a possible error in parsing a reply
-      {ok, DaemonPID} = korrpcdid_command_handler:reply_stop(Reply),
-      io:fwrite("~s~n", [DaemonPID]),
+      case proplists:get_bool("print-pid", Options) of
+        true ->
+          {ok, DaemonPID} = korrpcdid_command_handler:reply_stop(Reply),
+          io:fwrite("~s~n", [DaemonPID]);
+        false ->
+          ok
+      end,
       ok;
     {error, closed} ->
       % this normally shouldn't happen, but just in case the daemon's Erlang
@@ -289,6 +293,11 @@ store_arg(single, ["--help" | _], _Cmd) ->
   {error, help};
 store_arg(single, ["-h" | _], _Cmd) ->
   {error, help};
+
+store_arg(single, ["--print-pid" | _], Cmd = #cmd{options = Options}) ->
+  _NewCmd = Cmd#cmd{
+    options = [{"print-pid", true} | Options]
+  };
 
 store_arg(_, ["--socket", Path | _], Cmd = #cmd{}) ->
   NewCmd = Cmd#cmd{socket = Path},
