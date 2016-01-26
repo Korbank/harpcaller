@@ -102,8 +102,7 @@ handle_command([{<<"command">>, <<"dist_stop">>}] = _Command, _Args) ->
   ok = indira:distributed_stop(),
   [{result, ok}];
 
-handle_command(Command, _Args) ->
-  io:fwrite("got command ~p~n", [Command]),
+handle_command(_Command, _Args) ->
   [{error, <<"unsupported command">>}].
 
 %%----------------------------------------------------------
