@@ -13,7 +13,7 @@
 
 %% public interface
 -export([call/3, call/4, locate/1]).
--export([cancel/1, get_result/1, follow_stream/1]).
+-export([cancel/1, get_result/1, follow_stream/1, get_call_info/1]).
 -export([job_id/1]).
 
 %% supervision tree API
@@ -172,6 +172,32 @@ get_result(JobID) ->
 
 follow_stream(JobID) ->
   request(JobID, {follow, self()}).
+
+%% @doc Retrieve information about RPC call.
+%%   `{error,_}' is returned in case of read errors. `undefined' is returned
+%%   when there's no job with identifier of `JobID'.
+
+-spec get_call_info(korrpcdid:job_id()) ->
+    {ok, {korrpc_sdb:info_call(), Host :: term(), korrpc_sdb:info_time()}}
+  | {error, term()}
+  | undefined.
+
+get_call_info(JobID) ->
+  case request(JobID, get_sdb) of
+    {ok, StreamTable} ->
+      korrpc_sdb:info(StreamTable);
+    undefined ->
+      case korrpc_sdb:load(JobID) of
+        {ok, DBH} ->
+          {ok, Info} = korrpc_sdb:info(DBH),
+          korrpc_sdb:close(DBH),
+          {ok, Info};
+        {error, enoent} ->
+          undefined;
+        {error, Reason} ->
+          {error, Reason}
+      end
+  end.
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API

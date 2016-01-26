@@ -55,9 +55,9 @@
 %% public interface
 -export([new/4, load/1, close/1]).
 -export([started/1, insert/2, set_result/2]).
--export([result/1, stream/2, stream_size/1]).
+-export([result/1, stream/2, stream_size/1, info/1]).
 
--export_type([handle/0]).
+-export_type([handle/0, info_call/0, info_time/0]).
 
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
@@ -77,6 +77,14 @@
 %% UUID string representation.
 
 -type address() :: term().
+
+-type epoch() :: integer().
+
+-type info_call() :: {korrpc:procedure(), [korrpc:argument()]}.
+-type info_time() ::
+  {Submitted :: epoch(),
+    Started :: epoch() | undefined,
+    Ended :: epoch() | undefined}.
 
 -include("korrpc_sdb.hrl").
 
@@ -209,6 +217,14 @@ stream(Handle, Seq) when is_integer(Seq), Seq >= 0 ->
 
 stream_size(Handle) ->
   gen_server:call(Handle, get_stream_size).
+
+%% @doc Get information recorded about the RPC call.
+
+-spec info(handle()) ->
+  {ok, {info_call(), address(), info_time()}}.
+
+info(Handle) ->
+  gen_server:call(Handle, get_info).
 
 %% }}}
 %%----------------------------------------------------------
@@ -398,6 +414,23 @@ handle_call({get_stream, Seq} = _Request, _From,
 handle_call(get_stream_size = _Request, _From,
             State = #state{stream_counter = Count}) ->
   {reply, Count, State};
+
+%% get some information about RPC call
+handle_call(get_info = _Request, _From, State = #state{data = StreamTable}) ->
+  [{procedure, {_, _} = CallInfo}] = dets:lookup(StreamTable, procedure),
+  [{host, Host}] = dets:lookup(StreamTable, host),
+  [{job_submitted, SubmitTime}] = dets:lookup(StreamTable, job_submitted),
+  case dets:lookup(StreamTable, job_start) of
+    [{job_start, StartTime}] -> ok;
+    [] -> StartTime = undefined
+  end,
+  case dets:lookup(StreamTable, job_end) of
+    [{job_end, EndTime}] -> ok;
+    [] -> EndTime = undefined
+  end,
+  TimeInfo = {SubmitTime, StartTime, EndTime},
+  Info = {CallInfo, Host, TimeInfo},
+  {reply, {ok, Info}, State};
 
 %% open a handle to an already opened database
 handle_call({load, Pid} = _Request, _From,
