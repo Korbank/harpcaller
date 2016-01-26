@@ -26,6 +26,8 @@
 -export([command_dist_start/0, command_dist_stop/0]).
 -export([reply_dist_start/1, reply_dist_stop/1]).
 
+-define(LOG_CAT, control).
+
 %%%---------------------------------------------------------------------------
 %%% gen_indira_command callbacks
 %%%---------------------------------------------------------------------------
@@ -34,6 +36,7 @@
 %% daemon control
 
 handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
+  korrpcdid_log:info(?LOG_CAT, "stopping korrpcdid daemon", []),
   init:stop(),
   [{result, ok}, {pid, list_to_binary(os:getpid())}];
 
