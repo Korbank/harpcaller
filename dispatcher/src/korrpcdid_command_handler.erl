@@ -112,12 +112,30 @@ wait_for_start() ->
   end.
 
 list_jobs_info() ->
-  % TODO: more job info (queued, started, host, function, args)
+  _Result = [
+    job_info(Pid) ||
+    {_,Pid,_,_} <- supervisor:which_children(korrpcdid_caller_sup)
+  ].
+
+job_info(Pid) ->
   % TODO: catch errors from `korrpcdid_caller:job_id()' when task terminated
   %   between listing processes and checking out their info
-  _Result = [
-    list_to_binary(korrpcdid_caller:job_id(Pid)) ||
-    {_,Pid,_,_} <- supervisor:which_children(korrpcdid_caller_sup)
+  JobID = korrpcdid_caller:job_id(Pid),
+  {ok, {ProcInfo, Host, TimeInfo}} = korrpcdid_caller:get_call_info(JobID),
+  {ProcName, ProcArgs} = ProcInfo,
+  {SubmitTime, StartTime, EndTime} = TimeInfo,
+  _JobInfo = [
+    {<<"job">>, list_to_binary(JobID)},
+    {<<"call">>, [
+      {<<"procedure">>, ProcName},
+      {<<"arguments">>, ProcArgs},
+      {<<"host">>, Host}
+    ]},
+    {<<"time">>, [
+      {<<"submit">>, undef_null(SubmitTime)}, % non-null, but consistency
+      {<<"start">>,  undef_null(StartTime)},
+      {<<"end">>,    undef_null(EndTime)}
+    ]}
   ].
 
 %%----------------------------------------------------------
@@ -249,6 +267,9 @@ reply_dist_stop(Reply) ->
 invalid_reply(Reply) ->
   {ok, ReplyJSON} = indira_json:encode(Reply),
   ["invalid reply line: ", ReplyJSON].
+
+undef_null(undefined = _Value) -> null;
+undef_null(Value) -> Value.
 
 %%----------------------------------------------------------
 

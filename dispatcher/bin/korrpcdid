@@ -152,7 +152,7 @@ cmd(_Cmd = #cmd{op = list_jobs, socket = Socket}) ->
   case send_command(Socket, Command, ResultFun) of
     {ok, Jobs} ->
       io:fwrite("# jobs:~n"),
-      [io:fwrite("%  - ~1024p~n", [J]) || J <- Jobs],
+      [io:fwrite("~s~n", [format_job_info(J)]) || J <- Jobs],
       ok;
     {error, Message} ->
       {error, Message}
@@ -569,6 +569,10 @@ format_read_error(Reason) ->
 
 %%----------------------------------------------------------
 %% helpers {{{
+
+format_job_info(JobInfo) ->
+  {ok, JSON} = indira_json:encode(JobInfo),
+  JSON.
 
 %% @doc Convert string representation of an integer to integer itself.
 %%   Only accepts positive integers.
