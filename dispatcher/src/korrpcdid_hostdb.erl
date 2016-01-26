@@ -10,7 +10,7 @@
 -behaviour(gen_server).
 
 %% public interface
--export([resolve/1, refresh/0]).
+-export([resolve/1, refresh/0, list/0]).
 
 %% supervision tree API
 -export([start/0, start_link/0]).
@@ -61,6 +61,14 @@ resolve(Hostname) when is_binary(Hostname) ->
 
 refresh() ->
   korrpcdid_hostdb_refresh:refresh().
+
+%% @doc List all known hosts.
+
+-spec list() ->
+  [{korrpcdid:hostname(), korrpcdid:address(), inet:port_number()}].
+
+list() ->
+  gen_server:call(?MODULE, list_hosts).
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
@@ -131,6 +139,19 @@ handle_call({resolve, Hostname} = _Request, _From,
     [{{host, Hostname}, Entry}] -> Entry;
     [] -> none
   end,
+  {reply, Result, State};
+
+handle_call(list_hosts = _Request, _From, State = #state{table = Table}) ->
+  Result = dets:foldl(
+    fun
+      ({{host, Hostname}, {Hostname, Address, Port, _Creds}}, Acc) ->
+        [{Hostname, Address, Port} | Acc];
+      (_, Acc) ->
+        Acc
+    end,
+    [],
+    Table
+  ),
   {reply, Result, State};
 
 %% unknown calls

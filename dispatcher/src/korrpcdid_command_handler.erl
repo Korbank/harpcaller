@@ -62,7 +62,8 @@ handle_command([{<<"command">>, <<"cancel_job">>},
 %% hosts registry control
 
 handle_command([{<<"command">>, <<"list_hosts">>}] = _Command, _Args) ->
-  [{error, <<"command not implemented yet">>}];
+  Hosts = list_hosts(),
+  [{result, ok}, {hosts, Hosts}];
 
 handle_command([{<<"command">>, <<"refresh_hosts">>}] = _Command, _Args) ->
   korrpcdid_hostdb:refresh(),
@@ -136,6 +137,16 @@ job_info(Pid) ->
       {<<"start">>,  undef_null(StartTime)},
       {<<"end">>,    undef_null(EndTime)}
     ]}
+  ].
+
+list_hosts() ->
+  [format_host_entry(H) || H <- korrpcdid_hostdb:list()].
+
+format_host_entry({Hostname, Address, Port}) ->
+  _Entry = [
+    {<<"hostname">>, Hostname}, % binary
+    {<<"address">>, format_address(Address)}, % list
+    {<<"port">>, Port} % integer
   ].
 
 %%----------------------------------------------------------
@@ -270,6 +281,12 @@ invalid_reply(Reply) ->
 
 undef_null(undefined = _Value) -> null;
 undef_null(Value) -> Value.
+
+format_address({A,B,C,D} = _Address) ->
+  % TODO: IPv6
+  iolist_to_binary(io_lib:format("~B.~B.~B.~B", [A,B,C,D]));
+format_address(Address) when is_list(Address) ->
+  list_to_binary(Address).
 
 %%----------------------------------------------------------
 
