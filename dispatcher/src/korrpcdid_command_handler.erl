@@ -237,18 +237,16 @@ reply_list_queues([{<<"queues">>, Queues}, {<<"result">>, <<"ok">>}] = _Reply) -
 reply_list_queues(Reply) ->
   {error, invalid_reply(Reply)}.
 
-command_list_queue(Queue) ->
-  {ok, QueueStruct} = indira_json:decode(Queue),
-  [{command, list_queue}, {queue, QueueStruct}].
+command_list_queue(Queue) -> % XXX: `Queue' needs to be jsx structure
+  [{command, list_queue}, {queue, Queue}].
 
 reply_list_queue([{<<"jobs">>, Jobs}, {<<"result">>, <<"ok">>}] = _Reply) ->
   {ok, Jobs};
 reply_list_queue(Reply) ->
   {error, invalid_reply(Reply)}.
 
-command_cancel_queue(Queue) ->
-  {ok, QueueStruct} = indira_json:decode(Queue),
-  [{command, cancel_queue}, {queue, QueueStruct}].
+command_cancel_queue(Queue) -> % XXX: `Queue' needs to be jsx structure
+  [{command, cancel_queue}, {queue, Queue}].
 
 reply_cancel_queue([{<<"result">>, <<"ok">>}] = _Reply) -> ok;
 reply_cancel_queue(Reply) -> {error, invalid_reply(Reply)}.

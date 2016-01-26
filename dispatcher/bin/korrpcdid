@@ -357,9 +357,15 @@ store_arg(_, ["dist-erl-stop" | _],  Cmd = #cmd{op = undefined}) ->
 store_arg(_, [JobID | _], Cmd = #cmd{op = cancel_job, args = []}) ->
   _NewCmd = Cmd#cmd{args = [JobID]};
 store_arg(_, [Queue | _], Cmd = #cmd{op = list_queues, args = []}) ->
-  _NewCmd = Cmd#cmd{op = list_queue, args = [Queue]};
+  case indira_json:decode(Queue) of
+    {ok, QueueStruct} -> Cmd#cmd{op = list_queue, args = [QueueStruct]};
+    {error, badarg} -> {error, "invalid queue name format"}
+  end;
 store_arg(_, [Queue | _], Cmd = #cmd{op = cancel_queue, args = []}) ->
-  _NewCmd = Cmd#cmd{args = [Queue]};
+  case indira_json:decode(Queue) of
+    {ok, QueueStruct} -> Cmd#cmd{args = [QueueStruct]};
+    {error, badarg} -> {error, "invalid queue name format"}
+  end;
 
 store_arg(_, [Command | _], _Cmd = #cmd{op = undefined}) ->
   {error, ["unknown command: ", Command]};
