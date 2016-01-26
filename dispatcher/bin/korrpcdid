@@ -202,12 +202,13 @@ cmd(_Cmd = #cmd{op = list_queues, socket = Socket}) ->
 
 %% list specific job queue
 cmd(_Cmd = #cmd{op = list_queue, socket = Socket, args = [Queue]}) ->
+  % TODO: catch invalid queue format
   Command = korrpcdid_command_handler:command_list_queue(Queue),
   ResultFun = fun korrpcdid_command_handler:reply_list_queue/1,
   case send_command(Socket, Command, ResultFun) of
     {ok, Jobs} ->
       io:fwrite("# queue ~s:~n", [Queue]),
-      [io:fwrite("%  - ~1024p~n", [J]) || J <- Jobs],
+      [io:fwrite("~s~n", [format_job_info(J)]) || J <- Jobs],
       ok;
     {error, Message} ->
       {error, Message}
@@ -215,6 +216,7 @@ cmd(_Cmd = #cmd{op = list_queue, socket = Socket, args = [Queue]}) ->
 
 %% clear all the jobs from specific queue
 cmd(_Cmd = #cmd{op = cancel_queue, socket = Socket, args = [Queue]}) ->
+  % TODO: catch invalid queue format
   send_command(
     Socket,
     korrpcdid_command_handler:command_cancel_queue(Queue),

@@ -11,7 +11,7 @@
 %% public interface
 -export([enqueue/2]).
 -export([cancel/1]).
--export([list/0]).
+-export([list/0, list_processes/1]).
 
 %% supervision tree API
 -export([start/0, start_link/0]).
@@ -97,6 +97,14 @@ cancel(QueueName) ->
 
 list() ->
   gen_server:call(?MODULE, list_queues).
+
+%% @doc List processes (running and waiting for their turn) in a queue.
+
+-spec list_processes(queue_name()) ->
+  {Running :: [pid()], Queued :: [pid()]}.
+
+list_processes(QueueName) ->
+  gen_server:call(?MODULE, {list_queue, QueueName}).
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
@@ -187,6 +195,11 @@ handle_call({cancel, QueueName} = _Request, _From, State) ->
     #qentry{pid = Pid, qref = QRef} <- list_running(QueueName, State)],
   % XXX: deleting the queue will be done as `DOWN' messages arrive
   {reply, ok, State};
+
+handle_call({list_queue, QueueName} = _Request, _From, State) ->
+  Queued  = [Pid || #qentry{pid = Pid} <- list_queued(QueueName, State)],
+  Running = [Pid || #qentry{pid = Pid} <- list_running(QueueName, State)],
+  {reply, {Running, Queued}, State};
 
 handle_call(list_queues = _Request, _From, State) ->
   Queues = list_queues(State),

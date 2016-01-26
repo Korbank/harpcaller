@@ -77,10 +77,9 @@ handle_command([{<<"command">>, <<"list_queues">>}] = _Command, _Args) ->
   [{error, <<"command not implemented yet">>}];
 
 handle_command([{<<"command">>, <<"list_queue">>},
-                {<<"queue">>, _Queue}] = _Command, _Args) ->
-  % Jobs = list_jobs_info(Queue),
-  % [{result, ok}, {jobs, Jobs}]
-  [{error, <<"command not implemented yet">>}];
+                {<<"queue">>, Queue}] = _Command, _Args) ->
+  Jobs = list_queue(Queue),
+  [{result, ok}, {jobs, Jobs}];
 
 handle_command([{<<"command">>, <<"cancel_queue">>},
                 {<<"queue">>, Queue}] = _Command, _Args) ->
@@ -147,6 +146,14 @@ format_host_entry({Hostname, Address, Port}) ->
     {<<"hostname">>, Hostname}, % binary
     {<<"address">>, format_address(Address)}, % list
     {<<"port">>, Port} % integer
+  ].
+
+list_queue(QueueName) ->
+  {Running, Queued} = korrpcdid_call_queue:list_processes(QueueName),
+  _Result = [
+    [{running, true} | job_info(P)] || P <- Running
+  ] ++ [
+    [{running, false} | job_info(P)] || P <- Queued
   ].
 
 %%----------------------------------------------------------
