@@ -151,7 +151,6 @@ cmd(_Cmd = #cmd{op = list_jobs, socket = Socket}) ->
   ResultFun = fun korrpcdid_command_handler:reply_list_jobs/1,
   case send_command(Socket, Command, ResultFun) of
     {ok, Jobs} ->
-      io:fwrite("# jobs:~n"),
       [io:fwrite("~s~n", [format_job_info(J)]) || J <- Jobs],
       ok;
     {error, Message} ->
@@ -172,7 +171,6 @@ cmd(_Cmd = #cmd{op = list_hosts, socket = Socket}) ->
   ResultFun = fun korrpcdid_command_handler:reply_list_hosts/1,
   case send_command(Socket, Command, ResultFun) of
     {ok, Hosts} ->
-      io:fwrite("# hosts:~n"),
       [io:fwrite("~s~n", [format_host_info(H)]) || H <- Hosts],
       ok;
     {error, Message} ->
@@ -193,7 +191,6 @@ cmd(_Cmd = #cmd{op = list_queues, socket = Socket}) ->
   ResultFun = fun korrpcdid_command_handler:reply_list_queues/1,
   case send_command(Socket, Command, ResultFun) of
     {ok, Queues} ->
-      io:fwrite("# queues:~n"),
       [io:fwrite("~s~n", [format_queue_name(Q)]) || Q <- Queues],
       ok;
     {error, Message} ->
@@ -207,7 +204,6 @@ cmd(_Cmd = #cmd{op = list_queue, socket = Socket, args = [Queue]}) ->
   ResultFun = fun korrpcdid_command_handler:reply_list_queue/1,
   case send_command(Socket, Command, ResultFun) of
     {ok, Jobs} ->
-      io:fwrite("# queue ~s:~n", [Queue]),
       [io:fwrite("~s~n", [format_job_info(J)]) || J <- Jobs],
       ok;
     {error, Message} ->
