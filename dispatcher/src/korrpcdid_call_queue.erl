@@ -11,6 +11,7 @@
 %% public interface
 -export([enqueue/2]).
 -export([cancel/1]).
+-export([list/0]).
 
 %% supervision tree API
 -export([start/0, start_link/0]).
@@ -88,6 +89,14 @@ enqueue(QueueName, Concurrency) when is_integer(Concurrency), Concurrency > 0 ->
 
 cancel(QueueName) ->
   gen_server:call(?MODULE, {cancel, QueueName}).
+
+%% @doc List active (non-empty) queues.
+
+-spec list() ->
+  {ok, [queue_name()]}.
+
+list() ->
+  gen_server:call(?MODULE, list_queues).
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
@@ -178,6 +187,10 @@ handle_call({cancel, QueueName} = _Request, _From, State) ->
     #qentry{pid = Pid, qref = QRef} <- list_running(QueueName, State)],
   % XXX: deleting the queue will be done as `DOWN' messages arrive
   {reply, ok, State};
+
+handle_call(list_queues = _Request, _From, State) ->
+  Queues = list_queues(State),
+  {reply, {ok, Queues}, State};
 
 %% unknown calls
 handle_call(_Request, _From, State) ->
@@ -275,6 +288,18 @@ create_queue(QueueName, Concurrency, _State = #state{qopts = QueueOpts}) ->
 queue_status(QueueName, _State = #state{qopts = QueueOpts}) ->
   [Q] = ets:lookup(QueueOpts, QueueName),
   Q.
+
+%% @doc List active (non-empty) queues.
+
+-spec list_queues(#state{}) ->
+  [queue_name()].
+
+list_queues(_State = #state{qopts = QueueOpts}) ->
+  ets:foldl(
+    fun(#qopts{name = Name}, Acc) -> [Name | Acc] end,
+    [],
+    QueueOpts
+  ).
 
 %% @doc Delete remains of the queue.
 %%   Namely, the queue's options.
