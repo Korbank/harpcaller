@@ -9,14 +9,19 @@
 %%%   The events send with these functions have following structure:
 %%%   {@type @{log, pid(), info | warning | error, event_type(),
 %%%     event_info()@}}.
+%%%
+%%% @see korrpcdid_syslog_h
+%%% @see korrpcdid_stdout_h
 %%% @end
 %%%---------------------------------------------------------------------------
 
 -module(korrpcdid_log).
 
-%% public interface
+%% logging interface
 -export([info/2, warn/2, err/2]).
 -export([info/3, warn/3, err/3]).
+%% event serialization
+-export([to_string/1]).
 
 %% supervision tree API
 -export([start/0, start_link/0]).
@@ -30,7 +35,7 @@
 -type event_message() :: string() | binary().
 
 %%%---------------------------------------------------------------------------
-%%% public interface
+%%% logging interface
 %%%---------------------------------------------------------------------------
 
 %% @doc Event of informative significance.
@@ -92,7 +97,7 @@ err(EventType, Message, EventInfo) ->
   err(EventType, [{message, message(Message)} | EventInfo]).
 
 %%----------------------------------------------------------
-%% public interface helpers
+%% logging interface helpers
 %%----------------------------------------------------------
 
 %% @doc Send an event to the logger.
@@ -112,6 +117,36 @@ message(Message) when is_list(Message) ->
   list_to_binary(Message);
 message(Message) when is_binary(Message) ->
   Message.
+
+%%%---------------------------------------------------------------------------
+%%% event serialization
+%%%---------------------------------------------------------------------------
+
+%% @doc Convert {@type event_info()} to JSON string.
+%%
+%% @see korrpc_json:encode/1
+
+-spec to_string(event_info()) ->
+  iolist().
+
+to_string(Data) ->
+  {ok, JSON} = korrpc_json:encode([{K, struct_or_string(V)} || {K,V} <- Data]),
+  JSON.
+
+%% @doc Convert single value from {@type event_info()} to something
+%%   JSON-serializable.
+
+-spec struct_or_string(korrpc_json:struct() | {term, term()} | {str, string}) ->
+  korrpc_json:struct().
+
+struct_or_string({term, Term} = _Entry) ->
+  % 4GB line limit should be more than enough to have it in a single line
+  iolist_to_binary(io_lib:print(Term, 1, 16#FFFFFFFF, -1));
+struct_or_string({str, String} = _Entry) ->
+  % even if the string is a binary, this will convert it all to a binary
+  iolist_to_binary(String);
+struct_or_string(Entry) ->
+  Entry.
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
