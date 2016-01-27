@@ -6,7 +6,6 @@
 -define(DEFAULT_SOCKET_PATH, "/var/run/korrpcdid/korrpcdid.sock").
 
 %% TODO: reload code
-%% TODO: debug load (`application:start(sasl)')
 -record(cmd, {
   op :: start | wait_for_start | stop | reload_config |
         list_jobs | cancel_job |
@@ -28,7 +27,7 @@ help(IO) ->
   Script = filename:basename(escript:script_name()),
   io:fwrite(IO, "KorRPC dispatcher daemon.~n", []),
   io:fwrite(IO, "Controlling daemon:~n", []),
-  io:fwrite(IO, "  ~s [--socket=...] start [--config=...] [--pidfile=...]~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] start [--debug] [--config=...] [--pidfile=...]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] wait-for-start [--timeout=...]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] stop [--timeout=...] [--print-pid]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] reload-config~n", [Script]),
@@ -89,6 +88,10 @@ cmd(_Cmd = #cmd{op = start, socket = Socket, options = Options}) ->
           case proplists:get_value("pidfile", Options) of
             undefined -> ok;
             PidFile -> indira:set_option(indira, pidfile, PidFile)
+          end,
+          case proplists:get_bool("debug", Options) of
+            true -> indira:start_rec(sasl);
+            false -> ok
           end,
           indira:set_option(indira, listen, [{indira_unix, Socket}]),
           indira:set_option(indira, command, {korrpcdid_command_handler, []}),
@@ -295,6 +298,11 @@ store_arg(single, ["-h" | _], _Cmd) ->
 store_arg(single, ["--print-pid" | _], Cmd = #cmd{options = Options}) ->
   _NewCmd = Cmd#cmd{
     options = [{"print-pid", true} | Options]
+  };
+
+store_arg(single, ["--debug" | _], Cmd = #cmd{options = Options}) ->
+  _NewCmd = Cmd#cmd{
+    options = [{"debug", true} | Options]
   };
 
 store_arg(_, ["--socket", Path | _], Cmd = #cmd{}) ->
