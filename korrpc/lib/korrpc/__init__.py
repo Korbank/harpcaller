@@ -4,6 +4,19 @@ import socket
 import json
 
 #-----------------------------------------------------------------------------
+
+class CallNotFinished(object):
+    def __repr__(self):
+        return "<CallNotFinished>"
+
+class CallCancelled(object):
+    def __repr__(self):
+        return "<CallCancelled>"
+
+CALL_NOT_FINISHED = CallNotFinished()
+CALL_CANCELLED = CallCancelled()
+
+#-----------------------------------------------------------------------------
 # JSON connection reader {{{
 
 class JSONConnection(object):
@@ -28,6 +41,13 @@ class JSONConnection(object):
             self.sockf.close()
         self.sockf = None
 
+    def request(self, obj, close = True):
+        self.send(obj)
+        response = self.receive()
+        if close:
+            self.close()
+        return response
+
     def send(self, obj):
         # buffered write, so I can skip string concatenation to get whole line
         # written at once
@@ -45,8 +65,31 @@ class JSONConnection(object):
 #-----------------------------------------------------------------------------
 # exceptions {{{
 
-class KorRPCCallError(Exception):
+class KorRPCError(Exception, object):
     pass
+
+class CommunicationError(KorRPCError):
+    pass
+
+class RemoteException(KorRPCError):
+    def __init__(self, type, message, data = None):
+        super(RemoteException, self).__init__(message)
+        self.type = type
+        self.message = message
+        self.data = data
+
+    #def __str__(self):
+    #    pass # TODO: implement me
+
+class RemoteError(KorRPCError):
+    def __init__(self, type, message, data = None):
+        super(RemoteError, self).__init__(message)
+        self.type = type
+        self.message = message
+        self.data = data
+
+    #def __str__(self):
+    #    pass # TODO: implement me
 
 # }}}
 #-----------------------------------------------------------------------------
@@ -61,6 +104,10 @@ class KorRPC(object):
 
     def connect(self):
         return JSONConnection(self.host, self.port)
+
+    def request(self, req):
+        conn = self.connect()
+        return conn.request(req, close = True)
 
     def __getitem__(self, hostname):
         return RemoteServer(self, hostname)
@@ -108,15 +155,12 @@ class RemoteProcedure(object):
         elif len(kwargs) == 0:
             call_args = args
 
-        conn = self.dispatcher.connect()
-        conn.send({
+        reply = self.dispatcher.request({
             "korrpcdid": 1,
             "host": self.server._hostname,
             "procedure": self.procedure,
             "arguments": call_args,
         })
-        reply = conn.receive()
-        conn.close()
 
         return RemoteCall(self.dispatcher, reply["job_id"])
 
@@ -135,14 +179,45 @@ class RemoteCall(object):
         self.dispatcher = dispatcher
         self.job_id = job_id
 
-    def follow(self):
+    def follow(self, since = None, recent = None):
+        # TODO: all_packets = call.follow().all()
+        # TODO: for p in call.follow(): ...
         pass # TODO
 
-    def stream(self):
+    def stream(self, since = None, recent = None):
         pass # TODO
 
-    def result(self):
-        pass # TODO
+    def get(self, wait = False):
+        response = self.dispatcher.request({
+            "korrpcdid": 1,
+            "get_result": self.job_id,
+            "wait": wait,
+        })
+        if response is None:
+            raise CommunicationError("unexpected EOF")
+        if "no_result" in response and response["no_result"]:
+            return CALL_NOT_FINISHED
+        elif "cancelled" in response and response["cancelled"]:
+            return CALL_CANCELLED
+        elif "result" in response:
+            return response["result"]
+        elif "exception" in response:
+            # {"type": "...", "message": "...", "data": ...}
+            exception = response["exception"]
+            raise RemoteException(
+                exception["type"],
+                exception["message"],
+                exception.get("data"),
+            )
+        elif "error" in response:
+            # {"type": "...", "message": "...", "data": ...}
+            error = response["error"]
+            raise RemoteError(
+                error["type"],
+                error["message"],
+                error.get("data"),
+            )
+        #else: invalid response; throw an exception
 
     def cancel(self):
         pass # TODO
