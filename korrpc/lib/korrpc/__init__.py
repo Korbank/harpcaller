@@ -178,6 +178,33 @@ class RemoteProcedure(object):
 #-----------------------------------------------------------------------------
 
 class RemoteCall(object):
+
+    #-------------------------------------------------------
+    # StreamIterator {{{
+
+    class StreamIterator(object):
+        def __init__(self, remote_call, conn):
+            self.remote_call = remote_call
+            self.conn = conn
+
+        def __iter__(self):
+            return self
+
+        def next(self):
+            packet = self.conn.receive()
+            if packet is None or "packet" not in packet:
+                # TODO: if packet != None, save the result in a field of
+                # self.remote_call object
+                self.conn.close()
+                raise StopIteration()
+            return packet["data"]
+
+        def all(self):
+            return [packet for packet in self]
+
+    # }}}
+    #-------------------------------------------------------
+
     def __init__(self, dispatcher, job_id):
         self.dispatcher = dispatcher
         self.job_id = job_id
@@ -186,7 +213,7 @@ class RemoteCall(object):
         return self.job_id
 
     def follow(self, since = None, recent = None):
-        # TODO: all_packets = call.follow().all()
+        # TODO: return packet numbers somehow, so `since' is easy to work with
         request = {
             "korrpcdid": 1,
             "follow_stream": self.job_id,
@@ -200,15 +227,10 @@ class RemoteCall(object):
 
         conn = self.dispatcher.connect()
         conn.send(request)
-        packet = conn.receive()
-        while packet is not None and "packet" in packet:
-            # another packet, and it's not the end-of-stream marker
-            yield packet["data"]
-            packet = conn.receive()
-        conn.close()
+        return RemoteCall.StreamIterator(self, conn)
 
     def stream(self, since = None, recent = None):
-        # TODO: all_packets = call.stream().all()
+        # TODO: return packet numbers somehow, so `since' is easy to work with
         request = {
             "korrpcdid": 1,
             "read_stream": self.job_id,
@@ -222,12 +244,7 @@ class RemoteCall(object):
 
         conn = self.dispatcher.connect()
         conn.send(request)
-        packet = conn.receive()
-        while packet is not None and "packet" in packet:
-            # another packet, and it's not the end-of-stream marker
-            yield packet["data"]
-            packet = conn.receive()
-        conn.close()
+        return RemoteCall.StreamIterator(self, conn)
 
     def result(self, wait = False):
         response = self.dispatcher.request({
