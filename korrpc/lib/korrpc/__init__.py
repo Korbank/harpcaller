@@ -65,13 +65,16 @@ class JSONConnection(object):
 #-----------------------------------------------------------------------------
 # exceptions {{{
 
-class KorRPCError(Exception, object):
+class KorRPCException(Exception, object):
     pass
 
-class CommunicationError(KorRPCError):
+class CommunicationError(KorRPCException):
     pass
 
-class RemoteException(KorRPCError):
+class CancelledException(KorRPCException):
+    pass
+
+class RemoteException(KorRPCException):
     def __init__(self, type, message, data = None):
         super(RemoteException, self).__init__(message)
         self.type = type
@@ -81,7 +84,7 @@ class RemoteException(KorRPCError):
     #def __str__(self):
     #    pass # TODO: implement me
 
-class RemoteError(KorRPCError):
+class RemoteError(KorRPCException):
     def __init__(self, type, message, data = None):
         super(RemoteError, self).__init__(message)
         self.type = type
@@ -179,22 +182,61 @@ class RemoteCall(object):
         self.dispatcher = dispatcher
         self.job_id = job_id
 
+    def id(self):
+        return self.job_id
+
     def follow(self, since = None, recent = None):
         # TODO: all_packets = call.follow().all()
-        # TODO: for p in call.follow(): ...
-        pass # TODO
+        request = {
+            "korrpcdid": 1,
+            "follow_stream": self.job_id,
+            "since":  since,  # to be deleted if empty
+            "recent": recent, # to be deleted if empty
+        }
+        if request["since"] is None:
+            del request["since"]
+        if request["recent"] is None:
+            del request["recent"]
+
+        conn = self.dispatcher.connect()
+        conn.send(request)
+        packet = conn.receive()
+        while packet is not None and "packet" in packet:
+            # another packet, and it's not the end-of-stream marker
+            yield packet["data"]
+            packet = conn.receive()
+        conn.close()
 
     def stream(self, since = None, recent = None):
-        pass # TODO
+        # TODO: all_packets = call.stream().all()
+        request = {
+            "korrpcdid": 1,
+            "read_stream": self.job_id,
+            "since":  since,  # to be deleted if empty
+            "recent": recent, # to be deleted if empty
+        }
+        if request["since"] is None:
+            del request["since"]
+        if request["recent"] is None:
+            del request["recent"]
 
-    def get(self, wait = False):
+        conn = self.dispatcher.connect()
+        conn.send(request)
+        packet = conn.receive()
+        while packet is not None and "packet" in packet:
+            # another packet, and it's not the end-of-stream marker
+            yield packet["data"]
+            packet = conn.receive()
+        conn.close()
+
+    def result(self, wait = False):
         response = self.dispatcher.request({
             "korrpcdid": 1,
             "get_result": self.job_id,
             "wait": wait,
         })
         if response is None:
-            raise CommunicationError("unexpected EOF")
+            return CommunicationError("unexpected EOF")
         if "no_result" in response and response["no_result"]:
             return CALL_NOT_FINISHED
         elif "cancelled" in response and response["cancelled"]:
@@ -204,7 +246,7 @@ class RemoteCall(object):
         elif "exception" in response:
             # {"type": "...", "message": "...", "data": ...}
             exception = response["exception"]
-            raise RemoteException(
+            return RemoteException(
                 exception["type"],
                 exception["message"],
                 exception.get("data"),
@@ -212,15 +254,27 @@ class RemoteCall(object):
         elif "error" in response:
             # {"type": "...", "message": "...", "data": ...}
             error = response["error"]
-            raise RemoteError(
+            return RemoteError(
                 error["type"],
                 error["message"],
                 error.get("data"),
             )
-        #else: invalid response; throw an exception
+        #else: invalid response; return an exception
+
+    def get(self, wait = True):
+        result = self.result(wait = wait)
+        if isinstance(result, KorRPCException):
+            raise result
+        elif result is CALL_CANCELLED:
+            raise CancelledException()
+        return result
 
     def cancel(self):
-        pass # TODO
+        response = self.dispatcher.request({
+            "korrpcdid": 1,
+            "cancel": self.job_id,
+        })
+        return response["cancelled"] # True | False
 
     def __repr__(self):
         return '<%s.%s "%s">' % (
