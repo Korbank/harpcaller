@@ -118,7 +118,8 @@ request(JobID, Request) when is_list(JobID) ->
       try
         gen_server:call(Pid, Request)
       catch
-        exit:{noproc,_} -> undefined
+        exit:{noproc,_} -> undefined; % process has terminated earlier
+        exit:{normal,_} -> undefined  % process was terminating during the call
       end;
     [] -> undefined
   end.
