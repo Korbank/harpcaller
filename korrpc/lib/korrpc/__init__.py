@@ -33,6 +33,12 @@ class JSONConnection(object):
         self.sockf = s.makefile()
         s.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
     def __del__(self):
         self.close()
 
@@ -40,13 +46,6 @@ class JSONConnection(object):
         if self.sockf is not None:
             self.sockf.close()
         self.sockf = None
-
-    def request(self, obj, close = True):
-        self.send(obj)
-        response = self.receive()
-        if close:
-            self.close()
-        return response
 
     def send(self, obj):
         # buffered write, so I can skip string concatenation to get whole line
@@ -103,8 +102,9 @@ class KorRPC(object):
         return JSONConnection(self.host, self.port)
 
     def request(self, req):
-        conn = self.connect()
-        return conn.request(req, close = True)
+        with self.connect() as conn:
+            conn.send(req)
+            return conn.receive()
 
     def __call__(self, host, queue = None, concurrency = None,
                  timeout = None, max_exec_time = None):
