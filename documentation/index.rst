@@ -8,6 +8,13 @@ Table of contents
 .. toctree::
    :maxdepth: 2
 
+   overview
+   architecture
+   client/api
+   dispatcher/operations
+   daemon/operations
+   installation
+   internals
    glossary
 
 
