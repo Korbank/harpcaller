@@ -10,6 +10,8 @@ time:
 
 == communication with dispatcher ==
 
+  * job info request (called host, procedure, args, submitted/started/ended
+    time, ...)
   * SSL listening sockets
   * client authentication
   * add "enqueued" to possible returned values ("get_result", "read_stream")
@@ -17,6 +19,9 @@ time:
     i.e. executed on best effort basis)
   * list queue content (user command, similar in intent to "call", i.e. atomic
     and reliable)
+  * add job deduplication mechanism
+    * "call this function, but not if last call was less than 10 minutes ago"
+    * similar to queues: dedup key (~queue name) and dedup parameters
 
 == code internals ==
 
