@@ -1,6 +1,6 @@
-****************************
-KorRPC dispatcher operations
-****************************
+***************************
+Operating KorRPC dispatcher
+***************************
 
 * configuration
 * control commands

@@ -1,6 +1,6 @@
-************************
-KorRPC daemon operations
-************************
+***********************
+Operating KorRPC daemon
+***********************
 
 * configuration
 * procedures API
