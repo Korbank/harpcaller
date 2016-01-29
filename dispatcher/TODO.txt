@@ -19,9 +19,14 @@ time:
     i.e. executed on best effort basis)
   * list queue content (user command, similar in intent to "call", i.e. atomic
     and reliable)
-  * add job deduplication mechanism
+  * job deduplication mechanism
     * "call this function, but not if last call was less than 10 minutes ago"
     * similar to queues: dedup key (~queue name) and dedup parameters
+
+== communication with daemon ==
+
+  * verify daemon's SSL certificate
+  * authenticate against daemon
 
 == code internals ==
 

@@ -1,0 +1,8 @@
+Things that would be nice to have, but are not critical for production at this
+time:
+
+== communication with daemon ==
+
+  * connection forwarding (e.g. korrpcdid -> korrpcd -> korrpcd)
+    * intermediate korrpcd only forwards data left and right
+    * raw TCP connection (SSL inside SSL)
