@@ -133,7 +133,6 @@ class RemoteServer(object):
 
     def _call_options(self):
         result = {
-            "host": self._hostname,
             "queue": {
                 "name": self._queue,
                 "concurrency": self._concurrency,
@@ -172,6 +171,9 @@ class RemoteProcedure(object):
         self.server = server
         self.procedure = procedure
 
+    def host(self):
+        return str(self.server)
+
     def __call__(self, *args, **kwargs):
         if len(args) == 0 and len(kwargs) > 0:
             call_args = kwargs
@@ -180,6 +182,7 @@ class RemoteProcedure(object):
 
         request = {
             "korrpcdid": 1,
+            "host": str(self.server),
             "procedure": self.procedure,
             "arguments": call_args,
         }
