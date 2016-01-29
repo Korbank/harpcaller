@@ -81,18 +81,12 @@ class RemoteException(KorRPCException):
         self.message = message
         self.data = data
 
-    #def __str__(self):
-    #    pass # TODO: implement me
-
 class RemoteError(KorRPCException):
     def __init__(self, type, message, data = None):
         super(RemoteError, self).__init__(message)
         self.type = type
         self.message = message
         self.data = data
-
-    #def __str__(self):
-    #    pass # TODO: implement me
 
 # }}}
 #-----------------------------------------------------------------------------
@@ -112,8 +106,10 @@ class KorRPC(object):
         conn = self.connect()
         return conn.request(req, close = True)
 
-    def __getitem__(self, hostname):
-        return RemoteServer(self, hostname)
+    def __call__(self, host, queue = None, concurrency = None,
+                 timeout = None, max_exec_time = None):
+        return RemoteServer(self, host, queue, concurrency,
+                            timeout, max_exec_time)
 
     def __repr__(self):
         return "<%s.%s %s:%d>" % (
@@ -126,9 +122,34 @@ class KorRPC(object):
 #-----------------------------------------------------------------------------
 
 class RemoteServer(object):
-    def __init__(self, dispatcher, hostname):
+    def __init__(self, dispatcher, hostname, queue, concurrency,
+                 timeout, max_exec_time):
         self._dispatcher = dispatcher
         self._hostname = hostname
+        self._queue = queue
+        self._concurrency = concurrency
+        self._timeout = timeout
+        self._max_exec_time = max_exec_time
+
+    def _call_options(self):
+        result = {
+            "host": self._hostname,
+            "queue": {
+                "name": self._queue,
+                "concurrency": self._concurrency,
+            },
+            "timeout": self._timeout,
+            "max_exec_time": self._max_exec_time,
+        }
+        if result["queue"]["name"] is None:
+            del result["queue"]
+        elif result["queue"]["concurrency"] is None:
+            del result["queue"]["concurrency"]
+        if result["timeout"] is None:
+            del result["timeout"]
+        if result["max_exec_time"] is None:
+            del result["max_exec_time"]
+        return result
 
     def __getattr__(self, procedure):
         return RemoteProcedure(self._dispatcher, self, procedure)
@@ -152,18 +173,18 @@ class RemoteProcedure(object):
         self.procedure = procedure
 
     def __call__(self, *args, **kwargs):
-        # TODO: timeout, max_exec_time, queue, queue_concurrency
         if len(args) == 0 and len(kwargs) > 0:
             call_args = kwargs
         elif len(kwargs) == 0:
             call_args = args
 
-        reply = self.dispatcher.request({
+        request = {
             "korrpcdid": 1,
-            "host": self.server._hostname,
             "procedure": self.procedure,
             "arguments": call_args,
-        })
+        }
+        request.update(self.server._call_options())
+        reply = self.dispatcher.request(request)
 
         return RemoteCall(self.dispatcher, reply["job_id"])
 
