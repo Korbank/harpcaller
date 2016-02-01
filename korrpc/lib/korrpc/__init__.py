@@ -396,9 +396,18 @@ class RemoteProcedure(object):
         :param procedure: name of the procedure to call
         :type procedure: string
         '''
-        self.dispatcher = dispatcher
-        self.server = server
-        self.procedure = procedure
+        self._dispatcher = dispatcher
+        self._server = server
+        self._procedure = procedure
+
+    def procedure(self):
+        '''
+        :return: name of procedure to call
+        :rtype: string
+
+        Retrieve name of the procedure that will be called.
+        '''
+        return self._procedure
 
     def host(self):
         '''
@@ -407,7 +416,7 @@ class RemoteProcedure(object):
 
         Retrieve host this procedure will be called on.
         '''
-        return str(self.server)
+        return str(self._server)
 
     def __call__(self, *args, **kwargs):
         '''
@@ -423,21 +432,21 @@ class RemoteProcedure(object):
 
         request = {
             "korrpcdid": 1,
-            "host": str(self.server),
-            "procedure": self.procedure,
+            "host": str(self._server),
+            "procedure": self._procedure,
             "arguments": call_args,
         }
-        request.update(self.server._call_options())
-        reply = self.dispatcher.request(request)
+        request.update(self._server._call_options())
+        reply = self._dispatcher.request(request)
 
-        return RemoteCall(self.dispatcher, reply["job_id"])
+        return RemoteCall(self._dispatcher, reply["job_id"])
 
     def __repr__(self):
         return "<%s.%s %s:%s()>" % (
             self.__class__.__module__,
             self.__class__.__name__,
-            self.server._hostname,
-            self.procedure,
+            self.host(),
+            self.procedure(),
         )
 
 # }}}
