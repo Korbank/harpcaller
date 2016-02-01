@@ -466,15 +466,19 @@ class RemoteCall(object):
         '''
         Iterator for call's streamed result.
         '''
-        def __init__(self, remote_call, conn):
+        def __init__(self, remote_call, conn, numbered = False):
             '''
             :param remote_call: object representing a call to iterate through
             :type remote_call: :class:`RemoteCall`
             :param conn: connection to dispatcher server
             :type conn: :class:`JSONConnection`
+            :param numbered: whether iteration should yield tuples for easy
+                packet ID tracking
+            :type numbered: bool
             '''
             self.remote_call = remote_call
             self.conn = conn
+            self.numbered = numbered
 
         def __iter__(self):
             return self
@@ -486,7 +490,10 @@ class RemoteCall(object):
                 # self.remote_call object
                 self.conn.close()
                 raise StopIteration()
-            return packet["data"]
+            if self.numbered:
+                return (packet["packet"], packet["data"])
+            else:
+                return packet["data"]
 
         def all(self):
             '''
@@ -518,13 +525,17 @@ class RemoteCall(object):
         '''
         return self.job_id
 
-    def follow(self, since = None, recent = None):
+    def follow(self, since = None, recent = None, numbered = False):
         '''
         :param since: message number to read stream result from
         :type since: non-negative integer
         :param recent: number of messages before current to read stream result
             from
         :type recent: non-negative integer
+        :param numbered: if ``True``, iterator will produce pairs ``(pktid,
+            msg)``, with :obj:`pktid` having an analogous meaning to
+            :obj:`since`
+        :type numbered: bool
         :rtype: :class:`RemoteCall.StreamIterator`
 
         Follow job's streamed result, already collected and collected in the
@@ -539,6 +550,9 @@ class RemoteCall(object):
            job = rpc.job("e1c7b937-2428-42c2-9f22-f8fcf2906e65")
            for msg in job.follow():
                consume(msg)
+           # alternatively:
+           #for (i,msg) in job.follow(numbered = True):
+           #    consume(i, msg)
 
         See also :meth:`stream()`.
         '''
@@ -556,15 +570,19 @@ class RemoteCall(object):
 
         conn = self.dispatcher.connect()
         conn.send(request)
-        return RemoteCall.StreamIterator(self, conn)
+        return RemoteCall.StreamIterator(self, conn, numbered)
 
-    def stream(self, since = None, recent = None):
+    def stream(self, since = None, recent = None, numbered = False):
         '''
         :param since: message number to read stream result from
         :type since: non-negative integer
         :param recent: number of messages before current to read stream result
             from
         :type recent: non-negative integer
+        :param numbered: if ``True``, iterator will produce pairs ``(pktid,
+            msg)``, with :obj:`pktid` having an analogous meaning to
+            :obj:`since`
+        :type numbered: bool
         :rtype: :class:`RemoteCall.StreamIterator`
 
         Retrieve job's streamed result collected up until call. Function does
@@ -579,6 +597,9 @@ class RemoteCall(object):
            job = rpc.job("ef581fb8-a0ae-49a3-9eb3-a2cc505b28c9")
            for msg in job.stream():
                consume(msg)
+           # alternatively:
+           #for (i,msg) in job.stream(numbered = True):
+           #    consume(i, msg)
 
         See also :meth:`follow()`.
         '''
@@ -596,7 +617,7 @@ class RemoteCall(object):
 
         conn = self.dispatcher.connect()
         conn.send(request)
-        return RemoteCall.StreamIterator(self, conn)
+        return RemoteCall.StreamIterator(self, conn, numbered)
 
     def result(self, wait = False):
         '''
