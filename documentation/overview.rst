@@ -26,4 +26,48 @@ KorRPC system is designed to allow some level of load control, thanks to being
 a task queue. Call requests can specify what queue are they to be put in and
 how many calls from the queue can be running simultaneously (concurrency
 level). Queues are created as needed and are destroyed as soon as they become
-empty, so there's no need to pre-configure them for KorRPC.
+empty, so there's no need to pre-configure them for KorRPC. Queues are
+arbitrary and have nothing particular in common with called host, procedure,
+or procedure's arguments, so it is possible to issue the same call request
+twice or more, each time to a different queue.
+
+
+System architecture
+===================
+
+KorRPC system is divided into three parts: daemon, dispatcher, and client
+library.
+
+Daemon
+------
+
+KorRPC daemon is a service running on every server that can be a target for
+RPC call. It is meant to carry out any procedure that is called and send the
+value that the procedure returned as a response to RPC call. Code for the
+procedures available to daemon is supplied as daemon's configuration.
+
+Dispatcher
+----------
+
+KorRPC dispatcher is a single central service tasked with connecting to
+daemons to pass them call requests and receive call results, and to store
+these results on disk for later access.
+
+Given the queues are independent from any part of call requests, dispatcher is
+the place where queueing occurs.
+
+Dispatcher is also the service that client library talks to directly.
+
+Client library
+--------------
+
+Python :mod:`korrpc` module is a client implementation of the protocol to talk
+to dispatcher service (*note*: daemon uses slightly different protocol). The
+primary use case for this interface was to allow issuing commands to servers
+from within a web application, but it should be equally convenient for other
+uses.
+
+Module documentation: :ref:`client-lib-api`
+
+Example usage: :ref:`client-lib-examples`
+

@@ -9,7 +9,6 @@ Table of contents
    :maxdepth: 2
 
    overview
-   architecture
    client/api
    dispatcher/operations
    daemon/operations
