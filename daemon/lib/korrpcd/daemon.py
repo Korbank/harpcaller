@@ -1,4 +1,16 @@
 #!/usr/bin/python
+'''
+Network server and daemonization operations
+-------------------------------------------
+
+.. autoclass:: SSLServer
+   :members:
+
+.. autoclass:: RequestHandler
+   :members:
+
+'''
+#-----------------------------------------------------------------------------
 
 import socket
 import ssl
@@ -13,7 +25,34 @@ import proc
 # RequestHandler {{{
 
 class RequestHandler(SocketServer.BaseRequestHandler, object):
+    '''
+    KorRPC call request handler.
+
+    Attributes defined by parent class:
+
+    .. attribute:: request
+
+       client socket, as returned by :meth:`SSLServer.get_request()` in the
+       first field
+
+    .. attribute:: client_address
+
+       client address ``(IP, port)``, as returned by
+       :meth:`SSLServer.get_request()` in the second field
+
+    .. attribute:: server
+
+       :class:`SSLServer` instance
+    '''
+
+    #-------------------------------------------------------
+    # RequestError {{{
+
     class RequestError(Exception):
+        '''
+        Request processing error. Note that this is a different thing than
+        exception raised in called procedure's code.
+        '''
         def __init__(self, type, message, data = None):
             super(RequestHandler.RequestError, self).__init__(message)
             self._type = type
@@ -21,6 +60,9 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             self._data = data
 
         def struct(self):
+            '''
+            Return the error as a dict suitable for transmitting to client.
+            '''
             if self._data is not None:
                 error = {
                     "type": self._type,
@@ -35,14 +77,20 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 
             return { "korrpc": 1, "error": error }
 
+    # }}}
+    #-------------------------------------------------------
+
     def setup(self):
+        '''
+        Prepare request handler instance for work.
+        '''
         pass
 
     def handle(self):
-        # self.request (client socket)
-        # self.client_address (`(address, port)', as returned by
-        #   SSLServer.get_request())
-        # self.server (SSLServer instance)
+        '''
+        Handle the connection. This means reading client's request, processing
+        it, and sending results back.
+        '''
 
         try:
             (proc_name, arguments) = self.read_request()
@@ -75,9 +123,19 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             self.send({"result": procedure(*args, **kwargs)})
 
     def finish(self):
+        '''
+        Clean up request handler after work.
+        '''
         pass
 
     def read_request(self):
+        '''
+        :return: procedure name and its arguments
+        :rtype: tuple (unicode, dict | list)
+        :raise: :exc:`RequestHandler.RequestError`
+
+        Read call request from socket.
+        '''
         # TODO: catch read errors
         read_buffer = []
         fragment = self.request.read(self.server.max_line)
@@ -87,6 +145,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         read_buffer.append(fragment)
         read_buffer = "".join(read_buffer)
         if read_buffer == "": # EOF
+            # TODO: raise error
             return None
 
         lines = read_buffer.split('\n')
@@ -118,6 +177,12 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             raise RequestHandler.RequestError("invalid_request", str(e))
 
     def send(self, data):
+        '''
+        :param data: response to send
+        :type data: dict
+
+        Send response (stream, returned value, exception, error) to client.
+        '''
         # TODO: intercept "broken pipe"
         self.request.write(json.dumps(data, sort_keys = True) + "\n")
 
@@ -126,7 +191,24 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 # SSLServer {{{
 
 class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
-    def __init__(self, host, port, procs, key_file, cert_file, ca_file = None):
+    '''
+    :param host: address to bind to
+    :type host: string or ``None``
+    :param port: port to listen on
+    :type port: integer
+    :param procs: table with procedures to expose
+    :type procs: dict(name->callable)
+    :param cert_file: X.509 certificate
+    :type cert_file: path
+    :param key_file: private key for :obj:`cert_file`
+    :type key_file: path
+    :param ca_file: file with all X.509 CA certificates
+    :type ca_file: path
+
+    SSL connection server. Uses :class:`RequestHandler` to handle SSL
+    connections.
+    '''
+    def __init__(self, host, port, procs, cert_file, key_file, ca_file = None):
         if host is None:
             host = ""
         # XXX: hardcoded request handler class, since I won't use this server
@@ -151,9 +233,20 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         self.server_activate()
 
     def fileno(self):
+        '''
+        :return: file descriptor
+
+        Return file descriptor to wait for I/O events (``poll()``).
+        '''
         return self.socket.fileno()
 
     def get_request(self):
+        '''
+        :return: client socket and client address (IP+port)
+        :rtype: 2-tuple (socket, address)
+
+        Accept a new connection.
+        '''
         # XXX: SSL protocol errors are handled by SocketServer.BaseServer
         (client_socket, (addr, port)) = self.socket.accept()
         return (client_socket, (addr, port))
@@ -164,24 +257,50 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
     #    pass
 
     def server_activate(self):
+        '''
+        Prepare server for accepting connections.
+        '''
         self.socket.listen(1) # socket backlog of 1
 
     def server_bind(self):
+        '''
+        Bind server to its socket.
+        '''
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind(self.server_address)
         self.server_address = self.socket.getsockname()
 
     def server_close(self):
+        '''
+        Shutdown the server.
+        '''
         self.socket.close()
 
     def shutdown_request(self, client_socket):
+        '''
+        :param client_socket: socket where client connection is to be
+            terminated
+
+        Properly close the client socket, with notifying the client.
+
+        In forking SocketServer, this happens in child (worker) process.
+        '''
         # NOTE: shutdown only happens in child process (the one the socket
         # belongs to); it should involve informing the other end properly that
         # the connection is being closed
         client_socket.unwrap()
-        self.close_request(client_socket)
+        self.close_request(client_socket) # this, or duplicate its job here
 
     def close_request(self, client_socket):
+        '''
+        :param client_socket: socket to close
+
+        Close the client socket, but without tearing down the connection (e.g.
+        SSL shutdown handshake).
+
+        In forking SocketServer, this is called in parent (listener) process,
+        and may be called by implementation of :meth:`shutdown_request()`.
+        '''
         # NOTE: closing happens both in parent and child processes; it should
         # merely close the file descriptor
         client_socket.close()

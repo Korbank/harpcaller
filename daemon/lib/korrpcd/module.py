@@ -27,6 +27,8 @@ class ModuleLoader:
     '''
     Module loader. It can load module from :obj:`sys.path` or a code snippet
     from outside.
+
+    :class:`ModuleLoader` is a context manager.
     '''
 
     def __init__(self):
