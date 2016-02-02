@@ -67,7 +67,7 @@ class ModuleLoader:
         **NOTE**: Specifying a :obj:`name` under non-existent hierarchy may
         cause a warning to be issued. Better stick to a name that exists
         except for the last component, e.g.
-        :obj:`seismometer.dumbprobe.__config__`.
+        :obj:`korrpcd.__config__`.
         '''
         if file is None:
             module = __import__(name)

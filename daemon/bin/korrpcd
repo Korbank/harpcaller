@@ -71,7 +71,7 @@ with open(options.config) as f:
     configuration = yaml.safe_load(f)
 
 with korrpcd.module.ModuleLoader() as loader:
-    procedures_module = loader.load("procedures", options.procs)
+    procedures_module = loader.load("korrpcd.__procedures__", options.procs)
     procedures = {
         name: obj
         for (name, obj) in procedures_module.__dict__.items()
