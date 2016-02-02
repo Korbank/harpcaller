@@ -1,12 +1,10 @@
 #!/usr/bin/python
 
-import korrpcd
+import korrpcd.daemon
 import optparse
 import logging
 import logging.config
 import yaml
-import signal
-import sys
 
 #-----------------------------------------------------------------------------
 # parse command line options {{{
@@ -60,7 +58,10 @@ logging.config.dictConfig(logging_config)
 # }}}
 #-----------------------------------------------------------------------------
 
-# TODO: move signal handler to korrpcd.SSLServer class
+# TODO: move signal handler to korrpcd.daemon.SSLServer class
+
+import signal
+import sys
 
 def quit_daemon(sig, stack_frame):
     import os
@@ -76,9 +77,12 @@ signal.signal(signal.SIGINT, quit_daemon)
 
 #-----------------------------------------------------------------------------
 
+import korrpcd._devel_procedures
+
 # TODO: change the bind address, port, and files (and add CA)
-server = korrpcd.SSLServer(
+server = korrpcd.daemon.SSLServer(
     host = None, port = 1638,
+    procs = korrpcd._devel_procedures.PROCEDURES,
     cert_file = "../_ssl/korrpcd.cert.pem",
     key_file  = "../_ssl/korrpcd.key.pem",
 )
