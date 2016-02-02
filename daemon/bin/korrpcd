@@ -14,8 +14,13 @@ parser = optparse.OptionParser(
 )
 
 parser.add_option(
-    "-c", "--config", dest = "config", default = "/etc/korrpc/korrpcd.conf",
+    "-c", "--config", dest = "config",
+    default = "/etc/korrpc/korrpcd.conf",
     help = "configuration file", metavar = "FILE",
+)
+parser.add_option(
+    "-p", "--procedures", dest = "procs", default = "/etc/korrpc/korrpcd.py",
+    help = "procedures to expose", metavar = "FILE",
 )
 parser.add_option(
     "-l", "--logging", dest = "logging",
@@ -58,6 +63,17 @@ logging.config.dictConfig(logging_config)
 
 # }}}
 #-----------------------------------------------------------------------------
+# configuration and procedures {{{
+
+with open(options.config) as f:
+    configuration = yaml.safe_load(f)
+
+# TODO: load procedures from options.procs file
+import korrpcd._devel_procedures
+procedures = korrpcd._devel_procedures.PROCEDURES
+
+# }}}
+#-----------------------------------------------------------------------------
 
 # TODO: move signal handler to korrpcd.daemon.SSLServer class
 
@@ -78,14 +94,13 @@ signal.signal(signal.SIGINT, quit_daemon)
 
 #-----------------------------------------------------------------------------
 
-import korrpcd._devel_procedures
-
-# TODO: change the bind address, port, and files (and add CA)
+# TODO: pass authentication parameters
 server = korrpcd.daemon.SSLServer(
-    host = None, port = 1638,
-    procs = korrpcd._devel_procedures.PROCEDURES,
-    cert_file = "../_ssl/korrpcd.cert.pem",
-    key_file  = "../_ssl/korrpcd.key.pem",
+    host = configuration["network"].get("address"),
+    port = configuration["network"].get("port", 4306),
+    procs = procedures,
+    cert_file = configuration["network"]["certfile"],
+    key_file  = configuration["network"]["keyfile"],
 )
 server.serve_forever()
 
