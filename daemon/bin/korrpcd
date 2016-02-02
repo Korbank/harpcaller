@@ -32,7 +32,8 @@ parser.add_option(
 # logging {{{
 
 if options.logging is not None:
-    logging_config = yaml.safe_load(options.logging)
+    with open(options.logging) as f:
+        logging_config = yaml.safe_load(f)
 else:
     logging_config = {
         "version": 1,
