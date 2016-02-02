@@ -1,6 +1,8 @@
 #!/usr/bin/python
 
 import korrpcd.daemon
+import korrpcd.proc
+import korrpcd.module
 import optparse
 import logging
 import logging.config
@@ -68,9 +70,13 @@ logging.config.dictConfig(logging_config)
 with open(options.config) as f:
     configuration = yaml.safe_load(f)
 
-# TODO: load procedures from options.procs file
-import korrpcd._devel_procedures
-procedures = korrpcd._devel_procedures.PROCEDURES
+with korrpcd.module.ModuleLoader() as loader:
+    procedures_module = loader.load("procedures", options.procs)
+    procedures = {
+        name: obj
+        for (name, obj) in procedures_module.__dict__.items()
+        if isinstance(obj, korrpcd.proc.Procedure)
+    }
 
 # }}}
 #-----------------------------------------------------------------------------

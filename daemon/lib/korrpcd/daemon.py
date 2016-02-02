@@ -65,12 +65,12 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         # TODO: try-catch exceptions from call
         # TODO: try-catch exceptions from serializing results
         # TODO: intercept "broken pipe" situation and terminate early
-        if isinstance(procedure, proc.StreamedResult):
+        if isinstance(procedure, proc.StreamingProcedure):
             self.send({"korrpc": 1, "stream_result": True})
             for packet in procedure(*args, **kwargs):
                 self.send({"stream": packet})
             self.send({"result": procedure.result()})
-        else:
+        else: # isinstance(procedure, proc.Procedure)
             self.send({"korrpc": 1, "stream_result": False})
             self.send({"result": procedure(*args, **kwargs)})
 
