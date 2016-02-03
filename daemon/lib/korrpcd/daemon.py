@@ -98,7 +98,15 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             self.send(e.struct())
             return
 
-        # TODO: handle "no such procedure" error
+        if proc_name not in self.server.procedures:
+            e = RequestHandler.RequestError(
+                "no_such_procedure",
+                "no such procedure",
+                {"procedure": proc_name},
+            )
+            self.send(e.struct())
+            return
+
         procedure = self.server.procedures[proc_name]
 
         if isinstance(arguments, (list, tuple)):
@@ -108,19 +116,46 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             args = ()
             kwargs = arguments
         else:
-            return # TODO: signal an error
+            e = RequestHandler.RequestError(
+                "invalid_argument_list",
+                "argument list is neither a list nor a hash",
+            )
+            self.send(e.struct())
+            return
 
-        # TODO: try-catch exceptions from call
-        # TODO: try-catch exceptions from serializing results
-        # TODO: intercept "broken pipe" situation and terminate early
-        if isinstance(procedure, proc.StreamingProcedure):
-            self.send({"korrpc": 1, "stream_result": True})
-            for packet in procedure(*args, **kwargs):
-                self.send({"stream": packet})
-            self.send({"result": procedure.result()})
-        else: # isinstance(procedure, proc.Procedure)
-            self.send({"korrpc": 1, "stream_result": False})
-            self.send({"result": procedure(*args, **kwargs)})
+        try:
+            if isinstance(procedure, proc.StreamingProcedure):
+                self.send({"korrpc": 1, "stream_result": True})
+                for packet in procedure(*args, **kwargs):
+                    self.send({"stream": packet})
+                self.send({"result": procedure.result()})
+            else: # isinstance(procedure, proc.Procedure)
+                self.send({"korrpc": 1, "stream_result": False})
+                self.send({"result": procedure(*args, **kwargs)})
+        except RequestHandler.RequestError, e:
+            # possible exceptions of this type:
+            #   - packet serialization error
+            #   - result serialization error
+            #   - send() error
+            try:
+                self.send(e.struct())
+            except:
+                pass # ignore error sending errors
+        except Exception, e:
+            exception_message = {
+                "exception": {
+                    "type": e.__class__.__name__,
+                    "message": str(e),
+                    "data": {
+                        "class": e.__class__.__name__,
+                        "module": e.__class__.__module__,
+                    }
+                }
+            }
+            try:
+                self.send(exception_message)
+            except:
+                pass # ignore error sending errors
 
     def finish(self):
         '''
@@ -145,8 +180,10 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         read_buffer.append(fragment)
         read_buffer = "".join(read_buffer)
         if read_buffer == "": # EOF
-            # TODO: raise error
-            return None
+            raise RequestHandler.RequestError(
+                "invalid_request",
+                "request incomplete or too long",
+            )
 
         lines = read_buffer.split('\n')
         if len(lines) < 2:
@@ -183,8 +220,17 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 
         Send response (stream, returned value, exception, error) to client.
         '''
-        # TODO: intercept "broken pipe"
-        self.request.write(json.dumps(data, sort_keys = True) + "\n")
+        try:
+            line = json.dumps(data, sort_keys = True)
+        except Exception, e:
+            raise RequestHandler.RequestError("invalid_message", str(e))
+
+        try:
+            self.request.write(line + "\n")
+        except socket.error, e:
+            # nobody to report send errors to, but it will abort a possible
+            # iteration
+            raise RequestHandler.RequestError("network_error", str(e))
 
 # }}}
 #-----------------------------------------------------------------------------
@@ -288,7 +334,10 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         # NOTE: shutdown only happens in child process (the one the socket
         # belongs to); it should involve informing the other end properly that
         # the connection is being closed
-        client_socket.unwrap()
+        try:
+            client_socket.unwrap()
+        except socket.error, e:
+            pass # possibly a prematurely closed socket
         self.close_request(client_socket) # this, or duplicate its job here
 
     def close_request(self, client_socket):
