@@ -155,7 +155,7 @@ send_request_3(Conn, Acknowledgement) ->
     [{<<"korrpc">>, 1}, {<<"stream_result">>, false}] ->
       {ok, Conn, single_return};
     %{"korrpc": 1, "error": {"type": "...", "message": "...", "data": ...}}
-    [{<<"korrpc">>, 1}, {<<"error">>, ErrorDesc}] ->
+    [{<<"error">>, ErrorDesc}, {<<"korrpc">>, 1}] ->
       case format_error(ErrorDesc) of
         {_,_,_} = Error -> {error, Error};
         {_,_}   = Error -> {error, Error};
