@@ -3,6 +3,12 @@ Operating KorRPC daemon
 ***********************
 
 * configuration
-* procedures API
+
+  * htpasswd authentication (:mod:`korrpcd.auth.htpasswd`)
+
+* procedures API (:mod:`korrpcd.proc`)
+
+  * procedure wrapper object lifetime
+
 * communication protocol
 
