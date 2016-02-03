@@ -486,9 +486,9 @@ class RemoteCall(object):
         def next(self):
             packet = self.conn.receive()
             if packet is None or "packet" not in packet:
-                # TODO: if packet != None, save the result in a field of
-                # self.remote_call object
                 self.conn.close()
+                if packet is not None:
+                    self.remote_call._remember_result(packet)
                 raise StopIteration()
             if self.numbered:
                 return (packet["packet"], packet["data"])
@@ -515,6 +515,8 @@ class RemoteCall(object):
         '''
         self.dispatcher = dispatcher
         self.job_id = job_id
+        self._result = None
+        self._has_result = False
 
     def id(self):
         '''
@@ -637,36 +639,46 @@ class RemoteCall(object):
 
         See also :meth:`get()`.
         '''
-        response = self.dispatcher.request({
-            "korrpcdid": 1,
-            "get_result": self.job_id,
-            "wait": wait,
-        })
-        if response is None:
-            return CommunicationError("unexpected EOF")
-        if "no_result" in response and response["no_result"]:
-            return CALL_NOT_FINISHED
-        elif "cancelled" in response and response["cancelled"]:
-            return CALL_CANCELLED
-        elif "result" in response:
-            return response["result"]
-        elif "exception" in response:
+        if not self._has_result:
+            response = self.dispatcher.request({
+                "korrpcdid": 1,
+                "get_result": self.job_id,
+                "wait": wait,
+            })
+            self._remember_result(response)
+        return self._result
+
+    def _remember_result(self, message):
+        self._has_result = True
+        if message is None:
+            self._result = CommunicationError("unexpected EOF")
+        if "no_result" in message and message["no_result"]:
+            # get_result with wait=false
+            self._result = CALL_NOT_FINISHED
+        elif "continue" in message and message["continue"]:
+            # read_stream
+            self._result = CALL_NOT_FINISHED
+        elif "cancelled" in message and message["cancelled"]:
+            self._result = CALL_CANCELLED
+        elif "result" in message:
+            self._result = message["result"]
+        elif "exception" in message:
             # {"type": "...", "message": "...", "data": ...}
-            exception = response["exception"]
-            return RemoteException(
+            exception = message["exception"]
+            self._result = RemoteException(
                 exception["type"],
                 exception["message"],
                 exception.get("data"),
             )
-        elif "error" in response:
+        elif "error" in message:
             # {"type": "...", "message": "...", "data": ...}
-            error = response["error"]
-            return RemoteError(
+            error = message["error"]
+            self._result = RemoteError(
                 error["type"],
                 error["message"],
                 error.get("data"),
             )
-        #else: invalid response; return an exception
+        #else: invalid message; return an exception
 
     def get(self, wait = True):
         '''
