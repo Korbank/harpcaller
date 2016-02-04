@@ -2,13 +2,30 @@
 Operating KorRPC daemon
 ***********************
 
-* configuration
+Command line
+============
 
-  * htpasswd authentication (:mod:`korrpcd.auth.htpasswd`)
+**TODO**
 
-* procedures API (:mod:`korrpcd.proc`)
 
-  * procedure wrapper object lifetime
+Configuration
+=============
 
-* communication protocol
+**TODO**
+
+
+Writing procedures
+==================
+
+**TODO**: procedure wrapper object lifetime
+
+.. automodule:: korrpcd.proc
+
+
+Auth database backends
+======================
+
+.. automodule:: korrpcd.auth.passfile
+
+.. automodule:: korrpcd.auth.inconfig
 
