@@ -18,11 +18,14 @@ Request
 ~~~~~~~
 
 Call with positional arguments:
-  {"korrpc": 1, "procedure": "...", "arguments": [...]}
+  {"korrpc": 1, "procedure": "...", "arguments": [...], "auth": {"user": "...", "password": "..."}}
 Call with named arguments:
-  {"korrpc": 1, "procedure": "...", "arguments": {...}}
+  {"korrpc": 1, "procedure": "...", "arguments": {...}, "auth": {"user": "...", "password": "..."}}
 Call with no arguments:
-  {"korrpc": 1, "procedure": "...", "arguments": []}
+  {"korrpc": 1, "procedure": "...", "arguments": [], "auth": {"user": "...", "password": "..."}}
+
+Each call request needs to be authenticated. Currently, the only
+authentication method is username+password pair.
 
 Acknowledgement
 ~~~~~~~~~~~~~~~
@@ -53,6 +56,8 @@ Predefined values of "type" are:
       "korrpc" field from the request is missing or carries wrong value
   "invalid_request"
       any other error with request structure
+  "auth_error"
+      user doesn't exist or password is invalid
   "no_such_procedure"
       requested procedure does not exist
   "procedure_loading_error"

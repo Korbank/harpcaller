@@ -70,6 +70,8 @@ logging.config.dictConfig(logging_config)
 with open(options.config) as f:
     configuration = yaml.safe_load(f)
 
+# TODO: check configuration["authentication"]["module"] for being a string
+
 with korrpcd.module.ModuleLoader() as loader:
     procedures_module = loader.load("korrpcd.__procedures__", options.procs)
     procedures = {
@@ -77,6 +79,9 @@ with korrpcd.module.ModuleLoader() as loader:
         for (name, obj) in procedures_module.__dict__.items()
         if isinstance(obj, korrpcd.proc.Procedure)
     }
+
+    authmod = loader.load(configuration["authentication"]["module"])
+    authdb = authmod.create(configuration["authentication"])
 
 # }}}
 #-----------------------------------------------------------------------------
@@ -100,11 +105,11 @@ signal.signal(signal.SIGINT, quit_daemon)
 
 #-----------------------------------------------------------------------------
 
-# TODO: pass authentication parameters
 server = korrpcd.daemon.SSLServer(
     host = configuration["network"].get("address"),
     port = configuration["network"].get("port", 4306),
     procs = procedures,
+    authdb = authdb,
     cert_file = configuration["network"]["certfile"],
     key_file  = configuration["network"]["keyfile"],
 )

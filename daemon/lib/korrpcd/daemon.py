@@ -93,8 +93,16 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         '''
 
         try:
-            (proc_name, arguments) = self.read_request()
+            (proc_name, arguments, (user, password)) = self.read_request()
         except RequestHandler.RequestError, e:
+            self.send(e.struct())
+            return
+
+        if not self.server.authdb.authenticate(user, password):
+            e = RequestHandler.RequestError(
+                "auth_error",
+                "unknown user or wrong password",
+            )
             self.send(e.struct())
             return
 
@@ -165,8 +173,8 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 
     def read_request(self):
         '''
-        :return: procedure name and its arguments
-        :rtype: tuple (unicode, dict | list)
+        :return: procedure name, its arguments, and authentication data
+        :rtype: tuple (unicode, dict | list, (unicode, unicode))
         :raise: :exc:`RequestHandler.RequestError`
 
         Read call request from socket.
@@ -207,9 +215,15 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         #   * request["korrpc"] == 1
         #   * request["procedure"] ~~ str | unicode
         #   * request["arguments"] ~~ dict | list
+        #   * request["auth"]["user"] ~~ str | unicode
+        #   * request["auth"]["password"] ~~ str | unicode
 
         try:
-            return (request["procedure"], request["arguments"])
+            return (
+                request["procedure"],
+                request["arguments"],
+                (request["auth"]["user"], request["auth"]["password"])
+            )
         except Exception, e:
             raise RequestHandler.RequestError("invalid_request", str(e))
 
@@ -254,16 +268,18 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
     SSL connection server. Uses :class:`RequestHandler` to handle SSL
     connections.
     '''
-    def __init__(self, host, port, procs, cert_file, key_file, ca_file = None):
+    def __init__(self, host, port, procs, authdb,
+                 cert_file, key_file, ca_file = None):
         if host is None:
             host = ""
         # XXX: hardcoded request handler class, since I won't use this server
         # with anything else
         super(SSLServer, self).__init__((host, port), RequestHandler)
-        # these two are parameters for RequestHandler, but can't be set in
+        # these are parameters for RequestHandler, but can't be set in
         # RequestHandler.__init__() (it doesn't get called O_o)
         self.max_line = 4096
         self.procedures = procs
+        self.authdb = authdb
 
         self.timeout = None
         self.socket = ssl.SSLSocket(
