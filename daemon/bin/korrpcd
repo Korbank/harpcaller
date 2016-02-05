@@ -7,6 +7,7 @@ import optparse
 import logging
 import logging.config
 import yaml
+import signal
 
 #-----------------------------------------------------------------------------
 # parse command line options {{{
@@ -86,20 +87,6 @@ with korrpcd.module.ModuleLoader() as loader:
 # }}}
 #-----------------------------------------------------------------------------
 
-# TODO: move signal handler to korrpcd.daemon.SSLServer class
-
-import signal
-import sys
-
-def quit_daemon(sig, stack_frame):
-    sys.exit(0)
-signal.signal(signal.SIGINT, quit_daemon)
-
-# TODO: forward the signal to children (SSLServer.active_children is a list of
-# PIDs or `None')
-
-#-----------------------------------------------------------------------------
-
 server = korrpcd.daemon.SSLServer(
     host = configuration["network"].get("address"),
     port = configuration["network"].get("port", 4306),
@@ -108,6 +95,12 @@ server = korrpcd.daemon.SSLServer(
     cert_file = configuration["network"]["certfile"],
     key_file  = configuration["network"]["keyfile"],
 )
+
+signal.signal(signal.SIGHUP, server.handle_signal)
+signal.signal(signal.SIGINT, server.handle_signal)
+signal.signal(signal.SIGQUIT, server.handle_signal)
+signal.signal(signal.SIGTERM, server.handle_signal)
+
 server.serve_forever()
 
 #-----------------------------------------------------------------------------

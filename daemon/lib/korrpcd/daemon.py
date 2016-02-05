@@ -17,6 +17,8 @@ import ssl
 import json
 import SocketServer
 import logging
+import os
+import sys
 
 from log import message as log
 import proc
@@ -341,6 +343,10 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         self.procedures = procs
         self.authdb = authdb
 
+        # necessary to detect if this is the child or parent process, so child
+        # won't forward signal to its older siblings
+        self.parent_pid = os.getpid()
+
         logger.info(log("listening on SSL socket", host = host, port = port))
         self.timeout = None
         self.socket = ssl.SSLSocket(
@@ -354,6 +360,27 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         )
         self.server_bind()
         self.server_activate()
+
+    def handle_signal(self, signum, stack_frame):
+        '''
+        Signal handler for :func:`signal.signal()` function. Calls
+        ``sys.exit(0)``, in daemon's main process additionally forwarding
+        signal to all the children.
+        '''
+        in_parent = (self.parent_pid == os.getpid())
+        if in_parent:
+            logger = logging.getLogger("korrpcd.daemon.server")
+        else:
+            logger = logging.getLogger("korrpcd.daemon.handle_client")
+        if in_parent:
+            logger.info(log("received signal, forwarding to children and exiting",
+                            signal = signum))
+            if self.active_children is not None:
+                for pid in self.active_children:
+                    os.kill(pid, signum)
+        else:
+            logger.info(log("received signal, exiting", signal = signum))
+        sys.exit(0)
 
     def fileno(self):
         '''
