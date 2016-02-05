@@ -509,10 +509,13 @@ send_message({Pid, _Ref} = _Entry, Message) ->
 start_request(_State = #state{request = {Procedure, ProcArgs, Hostname},
                               stream_table = StreamTable}) ->
   case korrpcdid_hostdb:resolve(Hostname) of
-    {Hostname, Address, Port, _Credentials} ->
+    {Hostname, Address, Port, {User, Password} = _Credentials} ->
       korrpc_sdb:started(StreamTable),
       % TODO: use `Credentials'
-      RequestOpts = [{host, Address}, {port, Port}],
+      RequestOpts = [
+        {host, Address}, {port, Port},
+        {user, User}, {password, Password}
+      ],
       korrpc:request(Procedure, ProcArgs, RequestOpts);
     none ->
       {error, unknown_host}

@@ -37,7 +37,7 @@
   Name :: korrpcdid:hostname(),
   Address :: korrpcdid:address(),
   Port :: inet:port_number(),
-  Credentials :: term()
+  Credentials :: {User :: binary(), Password :: binary()}
 }.
 
 %%% }}}

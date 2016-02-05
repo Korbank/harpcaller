@@ -46,6 +46,8 @@
 %%   <ul>
 %%     <li>{@type {host, inet:hostname() | inet:ip_address()@}} (required)</li>
 %%     <li>{@type {port, inet:port_number()@}} (required)</li>
+%%     <li>{@type {user, string() | binary()@}} (required)</li>
+%%     <li>{@type {password, string() | binary()@}} (required)</li>
 %%     <li>{@type {cafile, file:name()@}}</li>
 %%     <li>{@type {timeout, timeout()@}}</li>
 %%   </ul>
@@ -64,9 +66,12 @@ call(Procedure, Arguments, Options) when is_atom(Procedure) ->
 call(Procedure, Arguments, Options) when is_binary(Procedure) ->
   Host = proplists:get_value(host, Options),
   Port = proplists:get_value(port, Options),
+  User = iolist_to_binary(proplists:get_value(user, Options)),
+  Password = iolist_to_binary(proplists:get_value(password, Options)),
   CAFile = proplists:get_value(cafile, Options),
   Timeout = proplists:get_value(timeout, Options, infinity),
-  case send_request_1(Procedure, Arguments, Host, Port, CAFile, Timeout) of
+  case send_request_1(Procedure, Arguments, Host, Port, User, Password,
+                      CAFile, Timeout) of
     {ok, Conn, single_return} ->
       case ssl_recv(Conn, Timeout) of
         {ok, [{<<"result">>, Result}]} ->
@@ -118,9 +123,12 @@ request(Procedure, Arguments, Options) when is_atom(Procedure) ->
 request(Procedure, Arguments, Options) ->
   Host = proplists:get_value(host, Options),
   Port = proplists:get_value(port, Options),
+  User = iolist_to_binary(proplists:get_value(user, Options)),
+  Password = iolist_to_binary(proplists:get_value(password, Options)),
   CAFile = proplists:get_value(cafile, Options),
   Timeout = proplists:get_value(timeout, Options, infinity),
-  case send_request_1(Procedure, Arguments, Host, Port, CAFile, Timeout) of
+  case send_request_1(Procedure, Arguments, Host, Port, User, Password,
+                      CAFile, Timeout) of
     {ok, Conn, _ResultType} ->
       {ok, Conn};
     {error, Reason} ->
@@ -130,14 +138,21 @@ request(Procedure, Arguments, Options) ->
 %%----------------------------------------------------------
 %% sequence of operations to send call request {{{
 
-send_request_1(Procedure, Arguments, Host, Port, CAFile, Timeout) ->
+send_request_1(Procedure, Arguments, Host, Port, User, Password,
+               CAFile, Timeout) ->
   case ssl_connect(Host, Port, CAFile, Timeout) of
-    {ok, Conn}      -> send_request_2(Procedure, Arguments, Conn, Timeout);
-    {error, Reason} -> {error, Reason}
+    {ok, Conn} ->
+      send_request_2(Procedure, Arguments, User, Password, Conn, Timeout);
+    {error, Reason} ->
+      {error, Reason}
   end.
 
-send_request_2(Procedure, Arguments, Conn, Timeout) ->
-  Request = [{korrpc, 1}, {procedure, Procedure}, {arguments, Arguments}],
+send_request_2(Procedure, Arguments, User, Password, Conn, Timeout) ->
+  Request = [
+    {korrpc, 1},
+    {procedure, Procedure}, {arguments, Arguments},
+    {auth, [{user, User}, {password, Password}]}
+  ],
   case ssl_send(Conn, Request) of
     ok ->
       case ssl_recv(Conn, Timeout) of

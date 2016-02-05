@@ -215,8 +215,9 @@ decode_host_entry(String) ->
     % TODO: detect IPv4/IPv6 addresses
     Address = binary_to_list(orddict:fetch(<<"address">>, Data)),
     Port = orddict:fetch(<<"port">>, Data),
-    Credentials = orddict:fetch(<<"credentials">>, Data),
-    {Name, Address, Port, Credentials}
+    [{<<"password">>, Password}, {<<"user">>, User}] =
+      orddict:fetch(<<"credentials">>, Data),
+    {Name, Address, Port, {User, Password}}
   catch
     error:_ ->
       % not a valid JSON, not a JSON hash, or one of the mandatory fields is
