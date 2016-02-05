@@ -92,11 +92,6 @@ import signal
 import sys
 
 def quit_daemon(sig, stack_frame):
-    import os
-    print "<$$=%d> got signal %d, exiting" % (os.getpid(), sig)
-    # FIXME: if a child still waits for reading from the other end (in
-    # korrpcd.RequestHandler.handle()) when ^C was hit on terminal, this child
-    # gives ugly traceback instead of simply quitting
     sys.exit(0)
 signal.signal(signal.SIGINT, quit_daemon)
 

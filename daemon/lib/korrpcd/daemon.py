@@ -92,10 +92,24 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         it, and sending results back.
         '''
 
+        # XXX: SystemExit exception is not caught everywhere here, so there
+        # can be a situation when it propagates without control, but I don't
+        # like huge try..except around the whole method, so I'll leave it
+
         logger = logging.getLogger("korrpcd.daemon.handle_client")
 
         try:
             (proc_name, arguments, (user, password)) = self.read_request()
+        except SystemExit:
+            logger.info(log("aborted due to shutdown",
+                            client_address = self.client_address[0],
+                            client_port = self.client_address[1]))
+            e = RequestHandler.RequestError(
+                "shutdown",
+                "service is shutting down",
+            )
+            self.send(e.struct())
+            return
         except RequestHandler.RequestError, e:
             logger.info(log("error when reading request",
                             client_address = self.client_address[0],
@@ -183,6 +197,17 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 self.send(e.struct())
             except:
                 pass # ignore error sending errors
+        except SystemExit:
+            logger.info(log("aborted due to shutdown",
+                            client_address = self.client_address[0],
+                            client_port = self.client_address[1],
+                            procedure = proc_name))
+            e = RequestHandler.RequestError(
+                "shutdown",
+                "service is shutting down",
+            )
+            self.send(e.struct())
+            return
         except Exception, e:
             exception_message = {
                 "exception": {
