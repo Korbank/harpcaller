@@ -26,7 +26,6 @@ time:
 == communication with daemon ==
 
   * verify daemon's SSL certificate
-  * authenticate against daemon
 
 == code internals ==
 
