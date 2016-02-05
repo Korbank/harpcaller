@@ -93,12 +93,17 @@ class JSONConnection(object):
         Connect to the address specified in constructor.
         Newly created :class:`JSONConnection` objects are already connected.
         '''
-        # TODO: intercept exceptions and wrap them up in KorRPCException
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        s.connect((self.host, self.port))
-        self.sockf = s.makefile()
-        s.close()
+        try:
+            s.connect((self.host, self.port))
+            self.sockf = s.makefile()
+            s.close()
+        except socket.error, e:
+            s.close()
+            raise CommunicationError(
+                "can't connect to %s:%s: %s" % (self.host, self.port, str(e))
+            )
 
     def __enter__(self):
         return self
@@ -124,12 +129,19 @@ class JSONConnection(object):
 
         Send an object as a JSON line.
         '''
-        # buffered write, so I can skip string concatenation to get whole line
-        # written at once
-        # TODO: intercept exceptions and wrap them up in KorRPCException
-        self.sockf.write(json.dumps(obj))
-        self.sockf.write("\n")
-        self.sockf.flush()
+        if self.sockf is None:
+            raise CommunicationError("socket not connected")
+
+        try:
+            # buffered write, so I can skip string concatenation to get whole
+            # line written at once
+            self.sockf.write(json.dumps(obj))
+            self.sockf.write("\n")
+            self.sockf.flush()
+        except socket.error, e:
+            raise CommunicationError(
+                "can't send to %s:%s: %s" % (self.host, self.port, str(e))
+            )
 
     def receive(self):
         '''
@@ -268,7 +280,10 @@ class KorRPC(object):
         '''
         with self.connect() as conn:
             conn.send(req)
-            return conn.receive()
+            response = conn.receive()
+            if response is None:
+                raise CommunicationError("unexpected EOF")
+            return response
 
     def __call__(self, host, queue = None, concurrency = None,
                  timeout = None, max_exec_time = None):
@@ -558,7 +573,6 @@ class RemoteCall(object):
 
         See also :meth:`stream()`.
         '''
-        # TODO: return packet numbers somehow, so `since' is easy to work with
         request = {
             "korrpcdid": 1,
             "follow_stream": self.job_id,
@@ -605,7 +619,6 @@ class RemoteCall(object):
 
         See also :meth:`follow()`.
         '''
-        # TODO: return packet numbers somehow, so `since' is easy to work with
         request = {
             "korrpcdid": 1,
             "read_stream": self.job_id,
@@ -709,7 +722,6 @@ class RemoteCall(object):
             "korrpcdid": 1,
             "cancel": self.job_id,
         })
-        # TODO: catch an unexpected EOF error
         return response["cancelled"] # True | False
 
     def __repr__(self):
