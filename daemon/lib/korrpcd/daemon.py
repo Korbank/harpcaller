@@ -16,10 +16,10 @@ import socket
 import ssl
 import json
 import SocketServer
+import logging
 
+from log import message as log
 import proc
-
-# TODO: use logging
 
 #-----------------------------------------------------------------------------
 # RequestHandler {{{
@@ -92,13 +92,23 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         it, and sending results back.
         '''
 
+        logger = logging.getLogger("korrpcd.daemon.handle_client")
+
         try:
             (proc_name, arguments, (user, password)) = self.read_request()
         except RequestHandler.RequestError, e:
+            logger.info(log("error when reading request",
+                            client_address = self.client_address[0],
+                            client_port = self.client_address[1],
+                            error = e.struct()["error"]))
             self.send(e.struct())
             return
 
         if not self.server.authdb.authenticate(user, password):
+            logger.info(log("authentication error",
+                            client_address = self.client_address[0],
+                            client_port = self.client_address[1],
+                            user = user))
             e = RequestHandler.RequestError(
                 "auth_error",
                 "unknown user or wrong password",
@@ -107,6 +117,10 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             return
 
         if proc_name not in self.server.procedures:
+            logger.info(log("no such procedure",
+                            client_address = self.client_address[0],
+                            client_port = self.client_address[1],
+                            procedure = proc_name))
             e = RequestHandler.RequestError(
                 "no_such_procedure",
                 "no such procedure",
@@ -124,6 +138,12 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             args = ()
             kwargs = arguments
         else:
+            logger.info(log("invalid argument list in request",
+                            client_address = self.client_address[0],
+                            client_port = self.client_address[1],
+                            # XXX: `arguments' comes from deserialized JSON,
+                            # so it can be serialized back to JSON safely
+                            argument = arguments))
             e = RequestHandler.RequestError(
                 "invalid_argument_list",
                 "argument list is neither a list nor a hash",
@@ -132,6 +152,13 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             return
 
         try:
+            logger.info(log(
+                "calling procedure",
+                client_address = self.client_address[0],
+                client_port = self.client_address[1],
+                procedure = proc_name,
+                streaming = isinstance(procedure, proc.StreamingProcedure),
+            ))
             if isinstance(procedure, proc.StreamingProcedure):
                 self.send({"korrpc": 1, "stream_result": True})
                 for packet in procedure(*args, **kwargs):
@@ -145,6 +172,13 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             #   - packet serialization error
             #   - result serialization error
             #   - send() error
+            logger.info(log(
+                "procedure call error",
+                client_address = self.client_address[0],
+                client_port = self.client_address[1],
+                procedure = proc_name,
+                error = e.struct()["error"],
+            ))
             try:
                 self.send(e.struct())
             except:
@@ -270,6 +304,7 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
     '''
     def __init__(self, host, port, procs, authdb,
                  cert_file, key_file, ca_file = None):
+        logger = logging.getLogger("korrpcd.daemon.server")
         if host is None:
             host = ""
         # XXX: hardcoded request handler class, since I won't use this server
@@ -281,6 +316,7 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         self.procedures = procs
         self.authdb = authdb
 
+        logger.info(log("listening on SSL socket", host = host, port = port))
         self.timeout = None
         self.socket = ssl.SSLSocket(
             socket.socket(socket.AF_INET, socket.SOCK_STREAM),
@@ -311,6 +347,11 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         '''
         # XXX: SSL protocol errors are handled by SocketServer.BaseServer
         (client_socket, (addr, port)) = self.socket.accept()
+        logger = logging.getLogger("korrpcd.daemon.server")
+        logger.info(log(
+            "new client connected",
+            client_address = addr, client_port = port
+        ))
         return (client_socket, (addr, port))
 
     # TODO: handle error (when RequestHandler.handle() raises an exception)
@@ -336,6 +377,8 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         '''
         Shutdown the server.
         '''
+        logger = logging.getLogger("korrpcd.daemon.server")
+        logger.info(log("shutting down the listening socket"))
         self.socket.close()
 
     def shutdown_request(self, client_socket):
