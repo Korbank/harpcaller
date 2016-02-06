@@ -9,6 +9,9 @@ Network server and daemonization operations
 .. autoclass:: RequestHandler
    :members:
 
+.. autoclass:: Daemon
+   :members:
+
 '''
 #-----------------------------------------------------------------------------
 
@@ -19,10 +22,183 @@ import SocketServer
 import logging
 import os
 import sys
+import atexit
 
 from log import message as log
 import proc
 
+#-----------------------------------------------------------------------------
+# Daemon {{{
+
+class Daemon(object):
+    '''
+    Daemonization helper. If detach was requested, :func:`os.fork()` is
+    called, the parent process waits for start confirmation
+    (:meth:`confirm()`) and exits with code of ``0`` (``1`` if no confirmation
+    was received).
+
+    Child process changes its working directory to :file:`/` and after
+    confirmation, closes its STDIN, STDOUT, and STDERR (this way any uncaught
+    exception is printed to terminal).
+    '''
+
+    CONFIRMATION = "OK\n"
+
+    #-------------------------------------------------------
+    # PidFile(filename) {{{
+
+    class PidFile(object):
+        '''
+        Handle of a pidfile.
+
+        Creating an instance of this class automatically registers
+        :meth:`close()` as :mod:`atexit` handler. See :meth:`release()` if you
+        want to detach your daemon from terminal.
+        '''
+        def __init__(self, filename):
+            '''
+            :param filename: pidfile path
+            '''
+            self.filename = os.path.abspath(filename)
+            self.fh = None
+            fd = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0666)
+            self.fh = os.fdopen(fd, 'w')
+            self.update()
+            atexit.register(self.close)
+
+        def release(self):
+            '''
+            Close pidfile without deleting it.
+
+            To be used in parent process when detaching from terminal.
+            '''
+            if self.fh is not None:
+                self.fh.close()
+                self.fh = None
+
+        def close(self):
+            '''
+            Close and delete pidfile, if a pidfile is open.
+            '''
+            if self.fh is not None:
+                self.fh.close()
+                self.fh = None
+                os.unlink(self.filename)
+
+        def update(self):
+            '''
+            Update PID stored in pidfile to the one of this process.
+            '''
+            self.fh.seek(0)
+            self.fh.write("%d\n" % (os.getpid(),))
+            self.fh.flush()
+            self.fh.truncate()
+
+    # }}}
+    #-------------------------------------------------------
+
+    def __init__(self, pidfile = None, detach = False):
+        '''
+        :param pidfile: pidfile path
+        :param detach: whether the daemon should detach from terminal or not
+        '''
+        self.pidfile = None
+        self.should_detach = detach
+        self.detach_fh = None
+        if pidfile is not None:
+            self.pidfile = Daemon.PidFile(pidfile)
+        if self.should_detach:
+            self._detach()
+
+    def confirm(self):
+        '''
+        Confirm to parent that initialization was successful and daemon can
+        continue work from here.
+
+        Method to be called in child process when detaching from terminal.
+        '''
+        if self.should_detach:
+            self._close_stdio()
+        if self.detach_fh:
+            self.detach_fh.write(self.CONFIRMATION)
+            self.detach_fh.close()
+            self.detach_fh = None
+
+    def _detach(self):
+        '''
+        Call :func:`os.fork()`, keeping a one-way channel for initialization
+        confirmation, and call role handler method (:meth:`_child_process()`
+        or :meth:`_parent_process()`).
+
+        Method does not return in parent process.
+        '''
+        (read_fh, write_fh) = self._pipe()
+        child_pid = os.fork()
+        if child_pid == 0:
+            read_fh.close()
+            self.detach_fh = write_fh
+            self._child_process()
+        else:
+            write_fh.close()
+            self._parent_process(read_fh)
+
+    def _child_process(self):
+        '''
+        Child role handler.
+
+        Method updates PID stored in pidfile (if any) and changes working
+        directory to :file:`/`.
+
+        Function does not close STDIO. This is left for just after
+        initialization confirmation (:meth:`confirm()`), so any uncaught
+        exceptions can be printed to the screen.
+        '''
+        if self.pidfile is not None:
+            self.pidfile.update()
+        os.chdir("/")
+
+    def _parent_process(self, detach_fh):
+        '''
+        Parent role handler.
+
+        Parent process waits for the child to confirm that initialization was
+        successful and exits with ``0``. If child fails to confirm the
+        success, parent exits with ``1``.
+        '''
+        if self.pidfile is not None:
+            self.pidfile.release() # it's no longer our pidfile
+        confirmation = detach_fh.readline()
+        detach_fh.close()
+        if confirmation == self.CONFIRMATION:
+            os._exit(0)
+        elif confirmation == "": # premature EOF
+            os._exit(1)
+        else: # WTF?
+            os._exit(2)
+
+    def _pipe(self):
+        '''
+        :return: (read_handle, write_handle)
+
+        Create a pair of connected filehandles.
+        '''
+        (read_fd, write_fd) = os.pipe()
+        read_fh = os.fdopen(read_fd, 'r')
+        write_fh = os.fdopen(write_fd, 'w')
+        return (read_fh, write_fh)
+
+    def _close_stdio(self):
+        '''
+        Close STDIN, STDOUT, and STDERR. For safety, :file:`/dev/null` is
+        opened instead.
+        '''
+        devnull = os.open("/dev/null", os.O_RDWR)
+        os.dup2(devnull, 0)
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+        os.close(devnull)
+
+# }}}
 #-----------------------------------------------------------------------------
 # RequestHandler {{{
 

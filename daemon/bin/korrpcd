@@ -22,12 +22,20 @@ parser.add_option(
     help = "configuration file", metavar = "FILE",
 )
 parser.add_option(
-    "-p", "--procedures", dest = "procs", default = "/etc/korrpc/korrpcd.py",
+    "-r", "--procedures", dest = "procs", default = "/etc/korrpc/korrpcd.py",
     help = "procedures to expose", metavar = "FILE",
 )
 parser.add_option(
     "-l", "--logging", dest = "logging",
     help = "YAML/JSON file with logging configuration", metavar = "FILE",
+)
+parser.add_option(
+    "-d", "--daemon", dest = "detach", action = "store_true", default = False,
+    help = "run in background",
+)
+parser.add_option(
+    "-p", "--pidfile", dest = "pidfile", default = None,
+    help = "PID file to write", metavar = "FILE",
 )
 
 (options, args) = parser.parse_args()
@@ -87,6 +95,11 @@ with korrpcd.module.ModuleLoader() as loader:
 # }}}
 #-----------------------------------------------------------------------------
 
+daemon = korrpcd.daemon.Daemon(
+    detach = options.detach,
+    pidfile = options.pidfile,
+)
+
 server = korrpcd.daemon.SSLServer(
     host = configuration["network"].get("address"),
     port = configuration["network"].get("port", 4306),
@@ -100,6 +113,8 @@ signal.signal(signal.SIGHUP, server.handle_signal)
 signal.signal(signal.SIGINT, server.handle_signal)
 signal.signal(signal.SIGQUIT, server.handle_signal)
 signal.signal(signal.SIGTERM, server.handle_signal)
+
+daemon.confirm()
 
 server.serve_forever()
 
