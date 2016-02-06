@@ -135,12 +135,29 @@ class Daemon(object):
         (read_fh, write_fh) = self._pipe()
         child_pid = os.fork()
         if child_pid == 0:
+            self._double_fork()
             read_fh.close()
             self.detach_fh = write_fh
             self._child_process()
         else:
             write_fh.close()
             self._parent_process(read_fh)
+
+    def _double_fork(self):
+        '''
+        Lose controlling terminal permanently, by so-called "double fork"
+        procedure.
+
+        First, :func:`os.setsid()` is called in the child process (just after
+        :func:`os.fork()`), so the process loses its current controlling
+        terminal. Then :func:`os.fork()` is called for the second time, and
+        this time parent process simply exits. Child is not a session leader
+        anymore, so it can't gain controlling terminal accidentally, e.g. by
+        opening log output.
+        '''
+        os.setsid()
+        if os.fork() > 0:
+            os._exit(0)
 
     def _child_process(self):
         '''
