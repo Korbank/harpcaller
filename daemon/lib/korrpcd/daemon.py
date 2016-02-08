@@ -621,6 +621,20 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         self.socket.bind(self.server_address)
         self.server_address = self.socket.getsockname()
 
+    def finish_request(self, *args, **kwargs):
+        '''
+        Main work method. Creates a :class:`RequestHandler` instance and does
+        all the processing.
+
+        This method additionally closes listening socket just before passing
+        the control to :class:`RequestHandler`, since it's executed in the
+        child process and not in parent.
+        '''
+        if self.parent_pid != os.getpid():
+            # it should always be the case
+            self.socket.close()
+        return super(SSLServer, self).finish_request(*args, **kwargs)
+
     def server_close(self):
         '''
         Shutdown the server.
