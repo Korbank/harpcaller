@@ -570,7 +570,10 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
                             signal = signum))
             if self.active_children is not None:
                 for pid in self.active_children:
-                    os.kill(pid, signum)
+                    try:
+                        os.kill(pid, signum)
+                    except OSError:
+                        pass
         else:
             logger.info(log("received signal, exiting", signal = signum))
         sys.exit(0)
