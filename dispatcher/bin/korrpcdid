@@ -397,6 +397,8 @@ setup_korrpcdid(Config) ->
     {<<"default_timeout">>, {korrpcdid, default_timeout}},
     {<<"max_exec_time">>,   {korrpcdid, max_exec_time}},
     {<<"host_db_script">>,  {korrpcdid, host_db_script}},
+    {<<"ca_file">>,         {korrpcdid, ca_file}},
+    {<<"known_certs_file">>,{korrpcdid, known_certs_file}},
     {<<"host_db">>,         {korrpcdid, host_db}},
     {<<"host_db_refresh">>, {korrpcdid, host_db_refresh}},
     {<<"log_handlers">>,    {korrpcdid, log_handlers}}
@@ -485,6 +487,12 @@ cfg(<<"default_timeout">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
 
 cfg(<<"max_exec_time">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
   ok;
+
+cfg(<<"ca_file">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+cfg(<<"known_certs_file">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
 
 cfg(<<"host_db_script">> = _Key, _EnvKey, Path) when is_binary(Path) ->
   {ok, binary_to_list(Path)};

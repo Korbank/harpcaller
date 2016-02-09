@@ -22,13 +22,19 @@ default_timeout = 600
 # terminated [seconds]
 max_exec_time = 600
 
+# file with all recognized CAs; if not defined, no CA checking will be
+# performed when connecting to client
+#ca_file = "/etc/ssl/certs/ca-certificates.crt"
+# file with all recognized client certificates (may not exist)
+# TODO: define meaning of the file
+known_certs_file = "/etc/korrpcdid/known_certs.pem"
+
 #-----------------------------------------------------------------------------
 # hosts registry parameters
 
 # script to update hosts registry
 # expected script's output: JSON lines of following form:
-#   {"hostname": "localhost", "address": "127.0.0.1", "port": 3505, "credentials": ...}
-# TODO: determine how "credentials" will look like
+#   {"hostname": "localhost", "address": "127.0.0.1", "port": 3505, "credentials": {"user": "name", "password": "secret"}}
 host_db_script = "/etc/korrpcdid/update-hosts"
 
 # file to cache hosts registry

@@ -14,6 +14,7 @@ blockdiag {
   korrpcdid_tcp_sup -> korrpcdid_tcp_worker_sup;
   korrpcdid_tcp_worker_sup -> korrpcdid_tcp_worker;
   korrpcdid_call_sup -> korrpcdid_call_queue;
+  korrpcdid_call_sup -> korrpcdid_x509_store;
   korrpcdid_call_sup -> korrpcdid_caller_sup;
   korrpcdid_caller_sup -> korrpcdid_caller;
   korrpc_sdb_sup -> korrpc_sdb;
@@ -36,6 +37,7 @@ blockdiag {
     color = "#E6CCFF";
     korrpcdid_call_sup;
     korrpcdid_call_queue;
+    korrpcdid_x509_store;
     korrpcdid_caller_sup;
     korrpcdid_caller;
   }

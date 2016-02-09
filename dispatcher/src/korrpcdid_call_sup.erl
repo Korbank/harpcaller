@@ -36,6 +36,8 @@ init([] = _Args) ->
   Children = [
     {korrpcdid_call_queue, {korrpcdid_call_queue, start_link, []},
       permanent, 1000, worker, [korrpcdid_call_queue]},
+    {korrpcdid_x509_store, {korrpcdid_x509_store, start_link, []},
+      permanent, 1000, worker, [korrpcdid_x509_store]},
     {korrpcdid_caller_sup, {korrpcdid_caller_sup, start_link, []},
       permanent, 1000, supervisor, [korrpcdid_caller_sup]}
   ],

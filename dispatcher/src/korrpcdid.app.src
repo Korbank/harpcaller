@@ -17,6 +17,8 @@
   {applications, [kernel, stdlib, ssl, public_key, crypto]},
   {mod, {korrpcdid_app, []}}, % callback module
   {env, [
+    %{ca_file, ""},
+    %{known_certs_file, ""},
     %{stream_directory, ""},
     %{host_db_script, ""},
     %{host_db, ""},
