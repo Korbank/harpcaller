@@ -1,0 +1,21 @@
+version: 1
+root:
+  #level: ~ # optional; DEBUG, INFO, WARNING, ERROR, CRITICAL, NOTSET
+  level: NOTSET
+  #propagate: true  # optional; ignored for root logger
+  #filters: [...]   # optional
+  #handlers: [stderr, file]
+  handlers: [stderr]
+formatters:
+  terse:
+    format: "%(message)s"
+  timestamped:
+    format: "%(asctime)s %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+handlers:
+  stderr:
+    class: logging.StreamHandler
+    formatter: terse
+    #level:    CRITICAL
+    #filters: [...]
+    stream:   ext://sys.stderr

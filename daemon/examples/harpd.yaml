@@ -1,0 +1,9 @@
+network:
+  #address: 127.0.0.1
+  port: 4306
+  certfile: /etc/harpd/harpd.cert.pem
+  keyfile:  /etc/harpd/harpd.key.pem
+
+authentication:
+  module: harpd.auth.passfile
+  file: /etc/harpd/users.txt
