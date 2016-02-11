@@ -1,6 +1,6 @@
-==========================
-KorRPC dispatcher protocol
-==========================
+===================
+HarpCaller protocol
+===================
 
 Protocol is based on a line-wise JSON. Each message is serialized to a single
 line. The protocol is asynchronous: client receives job ID in response to
@@ -13,11 +13,11 @@ Client-side operations
 Call request
 ~~~~~~~~~~~~
 
-  {"korrpcdid": 1, "host": "...", "procedure": "...", "arguments": []}
-  {"korrpcdid": 1, "host": "...", "procedure": "...", "arguments": [...]}
-  {"korrpcdid": 1, "host": "...", "procedure": "...", "arguments": {...}}
-  {"korrpcdid": 1, ..., "timeout": integer, "max_exec_time": integer}
-  {"korrpcdid": 1, ..., "queue": {"name": {...}, "concurrency": C}}
+  {"harpcaller": 1, "host": "...", "procedure": "...", "arguments": []}
+  {"harpcaller": 1, "host": "...", "procedure": "...", "arguments": [...]}
+  {"harpcaller": 1, "host": "...", "procedure": "...", "arguments": {...}}
+  {"harpcaller": 1, ..., "timeout": integer, "max_exec_time": integer}
+  {"harpcaller": 1, ..., "queue": {"name": {...}, "concurrency": C}}
 
 Call may either use positional arguments or named arguments.
 Call with no arguments is indicated with an empty list.
@@ -36,13 +36,13 @@ some of them will be kept waiting until one or more currently executing calls
 terminate).
 
 Reply:
-  {"korrpcdid": 1, "job_id": "..."}
+  {"harpcaller": 1, "job_id": "..."}
 
 
 Job cancellation
 ~~~~~~~~~~~~~~~~
 
-  {"korrpcdid": 1, "cancel": "..."}
+  {"harpcaller": 1, "cancel": "..."}
 
 Value of "cancel" field is job ID.
 
@@ -56,8 +56,8 @@ False is returned if the job was terminated already or not existent at all.
 Receiving call result
 ~~~~~~~~~~~~~~~~~~~~~
 
-  {"korrpcdid": 1, "get_result": "..."}
-  {"korrpcdid": 1, "get_result": "...", "wait": true | false}
+  {"harpcaller": 1, "get_result": "..."}
+  {"harpcaller": 1, "get_result": "...", "wait": true | false}
 
 Value of "get_result" is job ID.
 
@@ -78,20 +78,20 @@ Reply:
   {"cancelled": true}
       job was cancelled before it returned any value
   {"error": {"type": "os_error", "message": "..."}}
-      connection to KorRPC daemon failed because of an error on OS side
+      connection to Harp daemon failed because of an error on OS side
   {"error": {"type": "network_error", "message": "..."}}
-      connection to KorRPC daemon failed because of a network error
-      (connection refused, connection broken, network timeout, etc.)
+      connection to Harp daemon failed because of a network error (connection
+      refused, connection broken, network timeout, etc.)
   {"error": {"type": "protocol_error", "message": "..."}}
-      KorRPC daemon responded to dispatcher's request with garbage
+      Harp daemon responded to dispatcher's request with garbage
 
 
 Reading result stream
 ~~~~~~~~~~~~~~~~~~~~~
 
-  {"korrpcdid": 1, "follow_stream": "..."}
-  {"korrpcdid": 1, "follow_stream": "...", "recent": integer}
-  {"korrpcdid": 1, "follow_stream": "...", "since": integer}
+  {"harpcaller": 1, "follow_stream": "..."}
+  {"harpcaller": 1, "follow_stream": "...", "recent": integer}
+  {"harpcaller": 1, "follow_stream": "...", "since": integer}
 
 Value of "follow_stream" is job ID.
 
@@ -123,9 +123,9 @@ words, any of the replies to "get_result" except "no_result".
 Reading result stream page-wise
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  {"korrpcdid": 1, "read_stream": "..."}
-  {"korrpcdid": 1, "read_stream": "...", "recent": integer}
-  {"korrpcdid": 1, "read_stream": "...", "since": integer}
+  {"harpcaller": 1, "read_stream": "..."}
+  {"harpcaller": 1, "read_stream": "...", "recent": integer}
+  {"harpcaller": 1, "read_stream": "...", "since": integer}
 
 Value of "read_stream" is job ID.
 

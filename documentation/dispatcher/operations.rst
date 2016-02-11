@@ -1,5 +1,5 @@
 ***************************
-Operating KorRPC dispatcher
+Operating HarpCaller daemon
 ***************************
 
 * configuration

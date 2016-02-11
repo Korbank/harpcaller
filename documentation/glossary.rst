@@ -4,7 +4,7 @@ Glossary
 
 **TODO**
 
-* dispatcher
+* call dispatcher (harpcaller)
 * daemon
 * client library
 * queue

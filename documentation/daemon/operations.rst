@@ -1,6 +1,6 @@
-***********************
-Operating KorRPC daemon
-***********************
+*********************
+Operating Harp daemon
+*********************
 
 Command line
 ============
@@ -19,13 +19,13 @@ Writing procedures
 
 **TODO**: procedure wrapper object lifetime
 
-.. automodule:: korrpcd.proc
+.. automodule:: harpd.proc
 
 
 Auth database backends
 ======================
 
-.. automodule:: korrpcd.auth.passfile
+.. automodule:: harpd.auth.passfile
 
-.. automodule:: korrpcd.auth.inconfig
+.. automodule:: harpd.auth.inconfig
 

@@ -1,24 +1,24 @@
-**************************
-KorRPC daemon architecture
-**************************
+************************
+Harp daemon architecture
+************************
 
 **TODO**
 
 Operator-facing modules
 =======================
 
-* :mod:`korrpcd.proc`
-* :mod:`korrpcd.auth.passfile`
-* :mod:`korrpcd.auth.inconfig`
+* :mod:`harpd.proc`
+* :mod:`harpd.auth.passfile`
+* :mod:`harpd.auth.inconfig`
 
 Internal modules
 ================
 
-.. automodule:: korrpcd.daemon
+.. automodule:: harpd.daemon
 
-.. automodule:: korrpcd.module
+.. automodule:: harpd.module
 
-.. automodule:: korrpcd.auth
+.. automodule:: harpd.auth
 
 
 Communication protocol

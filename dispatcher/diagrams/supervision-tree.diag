@@ -5,52 +5,52 @@ blockdiag {
   node_width = 160;
   //span_width = 40;
 
-  korrpcdid_sup -> korrpcdid_tcp_sup;
-  korrpcdid_sup -> korrpcdid_call_sup;
-  korrpcdid_sup -> korrpc_sdb_sup;
-  korrpcdid_sup -> korrpcdid_hostdb_sup;
-  korrpcdid_sup -> korrpcdid_log;
-  korrpcdid_tcp_sup -> korrpcdid_tcp_listener;
-  korrpcdid_tcp_sup -> korrpcdid_tcp_worker_sup;
-  korrpcdid_tcp_worker_sup -> korrpcdid_tcp_worker;
-  korrpcdid_call_sup -> korrpcdid_call_queue;
-  korrpcdid_call_sup -> korrpcdid_x509_store;
-  korrpcdid_call_sup -> korrpcdid_caller_sup;
-  korrpcdid_caller_sup -> korrpcdid_caller;
-  korrpc_sdb_sup -> korrpc_sdb;
-  korrpcdid_hostdb_sup -> korrpcdid_hostdb;
-  korrpcdid_hostdb_sup -> korrpcdid_hostdb_refresh;
+  harpcaller_sup -> harpcaller_tcp_sup;
+  harpcaller_sup -> harpcaller_call_sup;
+  harpcaller_sup -> harp_sdb_sup;
+  harpcaller_sup -> harpcaller_hostdb_sup;
+  harpcaller_sup -> harpcaller_log;
+  harpcaller_tcp_sup -> harpcaller_tcp_listener;
+  harpcaller_tcp_sup -> harpcaller_tcp_worker_sup;
+  harpcaller_tcp_worker_sup -> harpcaller_tcp_worker;
+  harpcaller_call_sup -> harpcaller_call_queue;
+  harpcaller_call_sup -> harpcaller_x509_store;
+  harpcaller_call_sup -> harpcaller_caller_sup;
+  harpcaller_caller_sup -> harpcaller_caller;
+  harp_sdb_sup -> harp_sdb;
+  harpcaller_hostdb_sup -> harpcaller_hostdb;
+  harpcaller_hostdb_sup -> harpcaller_hostdb_refresh;
 
-  korrpcdid_tcp_listener  [stacked];
-  korrpcdid_tcp_worker    [stacked];
-  korrpcdid_caller        [stacked];
-  korrpc_sdb              [stacked];
+  harpcaller_tcp_listener  [stacked];
+  harpcaller_tcp_worker    [stacked];
+  harpcaller_caller        [stacked];
+  harp_sdb                 [stacked];
 
   group data_serving {
     color = "#E6FFCC";
-    korrpcdid_tcp_sup;
-    korrpcdid_tcp_listener;
-    korrpcdid_tcp_worker_sup;
-    korrpcdid_tcp_worker;
+    harpcaller_tcp_sup;
+    harpcaller_tcp_listener;
+    harpcaller_tcp_worker_sup;
+    harpcaller_tcp_worker;
   }
   group calling_rpc {
     color = "#E6CCFF";
-    korrpcdid_call_sup;
-    korrpcdid_call_queue;
-    korrpcdid_x509_store;
-    korrpcdid_caller_sup;
-    korrpcdid_caller;
+    harpcaller_call_sup;
+    harpcaller_call_queue;
+    harpcaller_x509_store;
+    harpcaller_caller_sup;
+    harpcaller_caller;
   }
   group storing_results {
     color = "#FFCCCC";
-    korrpc_sdb_sup;
-    korrpc_sdb;
+    harp_sdb_sup;
+    harp_sdb;
   }
   group host_db {
     color = "#CCFFFF";
-    korrpcdid_hostdb_sup;
-    korrpcdid_hostdb;
-    korrpcdid_hostdb_refresh;
+    harpcaller_hostdb_sup;
+    harpcaller_hostdb;
+    harpcaller_hostdb_refresh;
   }
 }
 

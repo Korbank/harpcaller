@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# KorRPC documentation build configuration file, copied and manually adjusted
+# HarpRPC documentation build configuration file, copied and manually adjusted
 # from already generated config.
 #
 # This file is execfile()d with the current directory set to its containing dir.
@@ -11,12 +11,12 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
-# Python setup, a necessary thing for korrpc client module and korrpcd daemon
+# Python setup, a necessary thing for harp client module and harpd daemon
 # internals.
 import sys, os
 
 sys.path.insert(0, os.path.abspath('../daemon/lib'))
-sys.path.insert(0, os.path.abspath('../korrpc/lib'))
+sys.path.insert(0, os.path.abspath('../harp/lib'))
 
 # -- General configuration -----------------------------------------------------
 
@@ -40,7 +40,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'KorRPC system'
+project = u'Harp RPC system'
 copyright = u'2016, Korbank S.A.'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -178,7 +178,7 @@ html_static_path = ['static']
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'KorRPCdoc'
+htmlhelp_basename = 'HarpRPCdoc'
 
 
 # -- Options for LaTeX output --------------------------------------------------
@@ -197,7 +197,7 @@ latex_elements = {
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'korrpc.tex', u'KorRPC Documentation',
+  ('index', 'harprpc.tex', u'HarpRPC Documentation',
    u'Korbank S.A.', 'manual'),
 ]
 
@@ -227,7 +227,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'korrpc', u'KorRPC Documentation',
+    ('index', 'harprpc', u'HarpRPC Documentation',
      [u'Korbank S.A.'], 1)
 ]
 
@@ -241,8 +241,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  ('index', 'KorRPC', u'KorRPC Documentation',
-   u'Korbank S.A.', 'KorRPC', 'One line description of project.',
+  ('index', 'HarpRPC', u'HarpRPC Documentation',
+   u'Korbank S.A.', 'HarpRPC', 'One line description of project.',
    'Miscellaneous'),
 ]
 

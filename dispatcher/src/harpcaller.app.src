@@ -1,0 +1,34 @@
+{application, harpcaller, [
+  {description, "HarpCaller daemon"},
+  {vsn, "0.0.0"}, % remember about `overview.edoc'
+  {registered, [
+    harpcaller_sup,
+    harp_sdb_sup,
+    harpcaller_log,
+    harpcaller_call_sup,
+    harpcaller_caller_sup,
+    harpcaller_call_queue,
+    harpcaller_hostdb_sup,
+    harpcaller_hostdb,
+    harpcaller_hostdb_refresh_sup,
+    harpcaller_tcp_sup,
+    harpcaller_tcp_worker_sup
+  ]},
+  {applications, [kernel, stdlib, ssl, public_key, crypto]},
+  {mod, {harpcaller_app, []}}, % callback module
+  {env, [
+    %{ca_file, ""},
+    %{known_certs_file, ""},
+    %{stream_directory, ""},
+    %{host_db_script, ""},
+    %{host_db, ""},
+    {host_db_refresh, 900}, % seconds (no more than ~4.3M, but is 49+ days that useful?)
+    {default_timeout, 600}, % seconds
+    {max_exec_time,   600}, % seconds
+    {log_handlers, []}, % for harpcaller_log; list of `{Module :: atom(), Args :: term()}'
+    {listen, [
+      {any, 3502}
+    ]}
+  ]}
+]}.
+% vim:ft=erlang

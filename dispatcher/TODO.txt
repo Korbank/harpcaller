@@ -29,8 +29,8 @@ time:
 
 == code internals ==
 
-  * untangle job ID in korrpcdid_caller:call()
-  * korrpcdid_caller and korrpcdid_tcp_return_{result,stream}: refactoring
+  * untangle job ID in harpcaller_caller:call()
+  * harpcaller_caller and harpcaller_tcp_return_{result,stream}: refactoring
   * tcp_worker: list of modules
     * list all used modules, or
     * set `dynamic' and handle `get_modules' system command (how?)

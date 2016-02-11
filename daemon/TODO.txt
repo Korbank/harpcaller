@@ -3,6 +3,6 @@ time:
 
 == communication with daemon ==
 
-  * connection forwarding (e.g. korrpcdid -> korrpcd -> korrpcd)
-    * intermediate korrpcd only forwards data left and right
+  * connection forwarding (e.g. harpcaller -> harpd -> harpd)
+    * intermediate harpd only forwards data left and right
     * raw TCP connection (SSL inside SSL)

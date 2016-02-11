@@ -1,0 +1,122 @@
+#!/usr/bin/python
+
+import harpd.daemon
+import harpd.proc
+import harpd.module
+import optparse
+import logging
+import logging.config
+import yaml
+import signal
+
+#-----------------------------------------------------------------------------
+# parse command line options {{{
+
+parser = optparse.OptionParser(
+    usage = "%prog [options]"
+)
+
+parser.add_option(
+    "-c", "--config", dest = "config",
+    default = "/etc/harpd/harpd.conf",
+    help = "configuration file", metavar = "FILE",
+)
+parser.add_option(
+    "-r", "--procedures", dest = "procs", default = "/etc/harpd/harpd.py",
+    help = "procedures to expose", metavar = "FILE",
+)
+parser.add_option(
+    "-l", "--logging", dest = "logging",
+    help = "YAML/JSON file with logging configuration", metavar = "FILE",
+)
+parser.add_option(
+    "-d", "--daemon", dest = "detach", action = "store_true", default = False,
+    help = "run in background",
+)
+parser.add_option(
+    "-p", "--pidfile", dest = "pidfile", default = None,
+    help = "PID file to write", metavar = "FILE",
+)
+
+(options, args) = parser.parse_args()
+
+#if len(args) == 0:
+#    parser.error("argument not provided")
+
+# }}}
+#-----------------------------------------------------------------------------
+# logging {{{
+
+if options.logging is not None:
+    with open(options.logging) as f:
+        logging_config = yaml.safe_load(f)
+else:
+    logging_config = {
+        "version": 1,
+        "root": { "level": "INFO", "handlers": ["stderr"] },
+        "formatters": {
+            "terse": { "format": "%(message)s" },
+            "timestamped": {
+                "format": "%(asctime)s %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S",
+            },
+        },
+        "handlers": {
+            "stderr": {
+                "class": "logging.StreamHandler",
+                "formatter": "terse",
+                "stream": "ext://sys.stderr",
+            },
+        },
+    }
+
+logging.config.dictConfig(logging_config)
+
+# }}}
+#-----------------------------------------------------------------------------
+# configuration and procedures {{{
+
+with open(options.config) as f:
+    configuration = yaml.safe_load(f)
+
+# TODO: check configuration["authentication"]["module"] for being a string
+
+with harpd.module.ModuleLoader() as loader:
+    procedures_module = loader.load("harpd.__procedures__", options.procs)
+    procedures = {
+        name: obj
+        for (name, obj) in procedures_module.__dict__.items()
+        if isinstance(obj, harpd.proc.Procedure)
+    }
+
+    authmod = loader.load(configuration["authentication"]["module"])
+    authdb = authmod.create(configuration["authentication"])
+
+# }}}
+#-----------------------------------------------------------------------------
+
+daemon = harpd.daemon.Daemon(
+    detach = options.detach,
+    pidfile = options.pidfile,
+)
+
+server = harpd.daemon.SSLServer(
+    host = configuration["network"].get("address"),
+    port = configuration["network"].get("port", 4306),
+    procs = procedures,
+    authdb = authdb,
+    cert_file = configuration["network"]["certfile"],
+    key_file  = configuration["network"]["keyfile"],
+)
+
+signal.signal(signal.SIGHUP, server.handle_signal)
+signal.signal(signal.SIGINT, server.handle_signal)
+signal.signal(signal.SIGQUIT, server.handle_signal)
+signal.signal(signal.SIGTERM, server.handle_signal)
+
+daemon.confirm()
+
+server.serve_forever()
+
+#-----------------------------------------------------------------------------
+# vim:ft=python:foldmethod=marker

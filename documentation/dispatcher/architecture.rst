@@ -1,10 +1,10 @@
-******************************
-KorRPC dispatcher architecture
-******************************
+***********************
+HarpCaller architecture
+***********************
 
 **TODO**
 
-* ``korrpcdid`` application
+* ``harpcaller`` application
 * daemonization (``indira`` application)
 * communication protocol
 * administrative protocol (Indira's socket)

@@ -1,12 +1,12 @@
-======================
-KorRPC daemon protocol
-======================
+=======================
+HarpRPC daemon protocol
+=======================
 
 Protocol is based on a line-wise JSON. Each message is serialized to a single
 line. The protocol is synchronous, i.e., client waits for a response after
 each request.
 
-Since KorRPC is not planned to be a heavy duty service, requests are intended
+Since HarpRPC is not planned to be a heavy duty service, requests are intended
 to be carried in separate connections. Cancelling a request boils down to
 simply closing the connection before receiving result.
 
@@ -18,11 +18,11 @@ Request
 ~~~~~~~
 
 Call with positional arguments:
-  {"korrpc": 1, "procedure": "...", "arguments": [...], "auth": {"user": "...", "password": "..."}}
+  {"harp": 1, "procedure": "...", "arguments": [...], "auth": {"user": "...", "password": "..."}}
 Call with named arguments:
-  {"korrpc": 1, "procedure": "...", "arguments": {...}, "auth": {"user": "...", "password": "..."}}
+  {"harp": 1, "procedure": "...", "arguments": {...}, "auth": {"user": "...", "password": "..."}}
 Call with no arguments:
-  {"korrpc": 1, "procedure": "...", "arguments": [], "auth": {"user": "...", "password": "..."}}
+  {"harp": 1, "procedure": "...", "arguments": [], "auth": {"user": "...", "password": "..."}}
 
 Each call request needs to be authenticated. Currently, the only
 authentication method is username+password pair.
@@ -32,7 +32,7 @@ Acknowledgement
 
 Call request is immediately acknowledged with a message indicating whether
 there will be a streamed result or not. The message looks as follows:
-  {"korrpc": 1, "stream_result": true | false}
+  {"harp": 1, "stream_result": true | false}
 
 Transport-level error
 ~~~~~~~~~~~~~~~~~~~~~
@@ -41,7 +41,7 @@ If the request is ill-formatted, contains invalid data, points to
 a non-existing function, carries incorrect number of arguments, or there are
 other server-side problems with execution of the procedure, error is returned
 instead of acknowledgement:
-  {"korrpc": 1, "error": {"type": "...", "message": "...", "data": ...}}
+  {"harp": 1, "error": {"type": "...", "message": "...", "data": ...}}
 
 "type" indicates the kind of the error, in similar fashion as `errno' in unix
 system calls (except for being string). "message" is more detailed string that
@@ -53,7 +53,7 @@ Predefined values of "type" are:
   "parse_error"
       request line is not a valid JSON
   "invalid_protocol"
-      "korrpc" field from the request is missing or carries wrong value
+      "harp" field from the request is missing or carries wrong value
   "invalid_request"
       any other error with request structure
   "auth_error"

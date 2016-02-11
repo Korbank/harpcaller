@@ -1,0 +1,85 @@
+#
+# HarpCaller daemon configuration
+#
+
+#-----------------------------------------------------------------------------
+# network configuration
+
+# ports and addresses to listen on [list of strings "address:port"]
+listen = ["*:3502"]
+
+#-----------------------------------------------------------------------------
+# jobs
+
+# where to store jobs' results
+stream_directory = "/var/lib/harpcaller/stream/"
+
+# default timeout for any single read activity (either a result or a record of
+# job's stream output) [seconds]
+default_timeout = 600
+
+# maximum time that job is allowed to take; after this time, the job is
+# terminated [seconds]
+max_exec_time = 600
+
+#-----------------------------------------------------------------------------
+# SSL options
+
+# NOTE 1: If a CA was appended to `ca_file', it may be necessary to restart
+# dispatcher daemon for changes to take effect. `known_certs_file' doesn't
+# have this inconvenience.
+#
+# NOTE 2: If both `ca_file' and `known_certs_file' are specified, it's enough
+# for a certificate to either be valid or be whitelisted. If neither is
+# specified, any certificate will be accepted.
+
+# file with all recognized CAs
+# if specified, any certificate signed by one of these CAs will be accepted
+#ca_file = "/etc/harpcaller/ca_certs.pem"
+
+# file with whitelisted client certificates (may not exist)
+# if specified, any certificate from this list will be accepted, even if its
+# issuer CA was not recognized
+known_certs_file = "/etc/harpcaller/known_certs.pem"
+
+#-----------------------------------------------------------------------------
+# hosts registry parameters
+
+# script to update hosts registry
+# expected script's output: JSON lines of following form:
+#   {"hostname": "localhost", "address": "127.0.0.1", "port": 3505, "credentials": {"user": "name", "password": "secret"}}
+host_db_script = "/etc/harpcaller/update-hosts"
+
+# file to cache hosts registry
+host_db = "/var/lib/harpcaller/hosts.db"
+
+# how often the hosts registry will be refreshed [seconds]
+host_db_refresh = 900
+
+#-----------------------------------------------------------------------------
+# logging
+
+# list of log handlers for logs from HarpCaller
+# prepared handlers: harpcaller_syslog_h, harpcaller_stdout_h
+log_handlers = ["harpcaller_syslog_h"]
+
+#-----------------------------------------------------------------------------
+# Erlang configuration
+
+[erlang]
+
+# name of Erlang node in distributed mode (<node_name>@<hostname>)
+node_name = "harpcaller"
+# type of hostnames in distributed mode ("longnames" or "shortnames", as
+# net_kernel documentation says)
+name_type = "longnames"
+# text file with magic cookie to use in distributed Erlang
+cookie_file = "/etc/harpcaller/cookie.txt"
+# start distributed Erlang immediately or on command-line request
+# ("harpcallerd dist-erl-start")
+distributed_immediate = false
+
+# event handlers for error_logger (Erlang system events) to add when starting
+error_logger_handlers = []
+
+# vim:ft=dosini
