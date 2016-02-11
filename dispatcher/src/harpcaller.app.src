@@ -8,9 +8,10 @@
     harpcaller_call_sup,
     harpcaller_caller_sup,
     harpcaller_call_queue,
+    harpcaller_x509_store,
     harpcaller_hostdb_sup,
     harpcaller_hostdb,
-    harpcaller_hostdb_refresh_sup,
+    harpcaller_hostdb_refresh,
     harpcaller_tcp_sup,
     harpcaller_tcp_worker_sup
   ]},
