@@ -512,25 +512,35 @@ send_message({Pid, _Ref} = _Entry, Message) ->
 -spec start_request(#state{}) ->
   {ok, korrpc:handle()} | {error, term()}.
 
-start_request(_State = #state{request = {Procedure, ProcArgs, Hostname},
-                              stream_table = StreamTable, job_id = JobID}) ->
+start_request(State = #state{request = {Procedure, ProcArgs, Hostname},
+                             stream_table = StreamTable}) ->
   case korrpcdid_hostdb:resolve(Hostname) of
     {Hostname, Address, Port, {User, Password} = _Credentials} ->
       korrpc_sdb:started(StreamTable),
-      case application:get_env(ca_file) of
-        {ok, CAFile} -> CAOpts = [{cafile, CAFile}];
-        undefined    -> CAOpts = []
-      end,
-      VerifyArg = #ssl_verify{job_id = JobID},
+      SSLVerifyOpts = ssl_verify_options(State),
       RequestOpts = [
         {host, Address}, {port, Port},
-        {user, User}, {password, Password},
-        {ssl_verify, {fun verify_cert/3, VerifyArg}}
+        {user, User}, {password, Password}
       ],
-      korrpc:request(Procedure, ProcArgs, RequestOpts ++ CAOpts);
+      korrpc:request(Procedure, ProcArgs, RequestOpts ++ SSLVerifyOpts);
     none ->
       {error, unknown_host}
   end.
+
+ssl_verify_options(_State = #state{job_id = JobID}) ->
+  CAOpts = case application:get_env(ca_file) of
+    {ok, CAFile} -> [{cafile, CAFile}];
+    undefined -> []
+  end,
+  VerifyOpts = case application:get_env(known_certs_file) of
+    {ok, _KnownCertsFile} ->
+      VerifyArg = #ssl_verify{job_id = JobID},
+      [{ssl_verify, {fun verify_cert/3, VerifyArg}}];
+    undefined ->
+      % FIXME: no certificate verification logs when only `ca_file' defined
+      []
+  end,
+  CAOpts ++ VerifyOpts.
 
 %%%---------------------------------------------------------------------------
 

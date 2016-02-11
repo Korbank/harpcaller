@@ -82,19 +82,26 @@ start_link() ->
 %% @doc Initialize event handler.
 
 init([] = _Args) ->
-  % TODO: allow `known_certs_file' to be undefined
-  {ok, CAFile} = application:get_env(known_certs_file),
-  case read_certs(CAFile) of
-    {ok, Certs, CMTime} ->
+  case application:get_env(known_certs_file) of
+    {ok, CAFile} ->
+      case read_certs(CAFile) of
+        {ok, Certs, CMTime} ->
+          State = #state{
+            cert_file = CAFile,
+            certs = store(Certs),
+            last_change = CMTime
+          },
+          {ok, State};
+        {error, _Reason} ->
+          State = #state{
+            cert_file = CAFile,
+            certs = store([])
+          },
+          {ok, State}
+      end;
+    undefined ->
       State = #state{
-        cert_file = CAFile,
-        certs = store(Certs),
-        last_change = CMTime
-      },
-      {ok, State};
-    {error, _Reason} ->
-      State = #state{
-        cert_file = CAFile,
+        cert_file = undefined,
         certs = store([])
       },
       {ok, State}

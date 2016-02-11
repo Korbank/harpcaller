@@ -30,7 +30,8 @@ max_exec_time = 600
 # have this inconvenience.
 #
 # NOTE 2: If both `ca_file' and `known_certs_file' are specified, it's enough
-# for a certificate to either be valid or be whitelisted.
+# for a certificate to either be valid or be whitelisted. If neither is
+# specified, any certificate will be accepted.
 
 # file with all recognized CAs
 # if specified, any certificate signed by one of these CAs will be accepted
