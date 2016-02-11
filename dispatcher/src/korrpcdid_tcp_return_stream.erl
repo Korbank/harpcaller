@@ -302,6 +302,11 @@ format_result({error, closed} = _Result) ->
     {<<"type">>, <<"closed">>},
     {<<"message">>, <<"connection closed unexpectedly">>}
   ]}];
+format_result({error, esslconnect} = _Result) ->
+  [{<<"error">>, [
+    {<<"type">>, <<"esslconnect">>},
+    {<<"message">>, <<"server certificate verification failed">>}
+  ]}];
 format_result({error, Reason} = _Result) when is_atom(Reason) ->
   [{<<"error">>, [
     {<<"type">>, atom_to_binary(Reason, utf8)},

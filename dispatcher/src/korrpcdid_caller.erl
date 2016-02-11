@@ -58,6 +58,7 @@
                 Concurrency :: pos_integer()}}.
 
 -record(ssl_verify, {
+  job_id :: korrpcdid:job_id(), % for logging
   ca_path_valid = true :: boolean(),
   expected_hostname = any :: binary() | any
 }).
@@ -512,7 +513,7 @@ send_message({Pid, _Ref} = _Entry, Message) ->
   {ok, korrpc:handle()} | {error, term()}.
 
 start_request(_State = #state{request = {Procedure, ProcArgs, Hostname},
-                              stream_table = StreamTable}) ->
+                              stream_table = StreamTable, job_id = JobID}) ->
   case korrpcdid_hostdb:resolve(Hostname) of
     {Hostname, Address, Port, {User, Password} = _Credentials} ->
       korrpc_sdb:started(StreamTable),
@@ -520,11 +521,11 @@ start_request(_State = #state{request = {Procedure, ProcArgs, Hostname},
         {ok, CAFile} -> CAOpts = [{cafile, CAFile}];
         undefined    -> CAOpts = []
       end,
-      VerifyFun = {fun verify_cert/3, #ssl_verify{}},
+      VerifyArg = #ssl_verify{job_id = JobID},
       RequestOpts = [
         {host, Address}, {port, Port},
         {user, User}, {password, Password},
-        {ssl_verify, VerifyFun}
+        {ssl_verify, {fun verify_cert/3, VerifyArg}}
       ],
       korrpc:request(Procedure, ProcArgs, RequestOpts ++ CAOpts);
     none ->
@@ -541,19 +542,27 @@ verify_cert(_Cert, {extension, _} = _Event, Options) ->
   % ignore extensions whatsoever
   {unknown, Options};
 
-verify_cert(_Cert, _Event, _Options = #ssl_verify{ca_path_valid = false}) ->
+verify_cert(_Cert, _Event,
+            _Options = #ssl_verify{ca_path_valid = false, job_id = JobID}) ->
   % there was an invalid certificate somewhere above, even if accepted
   % conditionally; signal it's an unknown CA
+  korrpcdid_log:info(?LOG_CAT, "invalid server certificate (parent CA whitelisted)",
+                     [{job, {str, JobID}}]),
   {fail, {error, unknown_ca}};
 
-verify_cert(Cert, {bad_cert, _} = Event, Options) ->
+verify_cert(Cert, {bad_cert, _} = Event,
+            Options = #ssl_verify{job_id = JobID}) ->
   % if the certificate is in known certs store, accept it conditionally:
   % if it's a leaf, then the cert is valid, but if it's used as a CA,
   % verification will be rejected
   NewOptions = Options#ssl_verify{ca_path_valid = false},
   case korrpcdid_x509_store:known(Cert) of
-    true  -> {valid, NewOptions};
-    false -> {fail, Event}
+    true ->
+      {valid, NewOptions};
+    false ->
+      korrpcdid_log:info(?LOG_CAT, "invalid server certificate",
+                         [{job, {str, JobID}}]),
+      {fail, Event}
   end;
 
 verify_cert(_Cert, valid = _Event, Options) ->
