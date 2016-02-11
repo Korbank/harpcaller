@@ -30,6 +30,8 @@
 
 -opaque handle() :: ssl:sslsocket().
 
+-define(CA_VERIFY_DEPTH, 5).
+
 % }}}
 %%%---------------------------------------------------------------------------
 
@@ -49,6 +51,8 @@
 %%     <li>{@type {user, string() | binary()@}} (required)</li>
 %%     <li>{@type {password, string() | binary()@}} (required)</li>
 %%     <li>{@type {cafile, file:name()@}}</li>
+%%     <li>{@type {ssl_verify, @{fun(),term()@}@}} (the same as `{verify_fun,_}'
+%%         in {@link ssl:connect/4})</li>
 %%     <li>{@type {timeout, timeout()@}}</li>
 %%   </ul>
 %%
@@ -69,9 +73,10 @@ call(Procedure, Arguments, Options) when is_binary(Procedure) ->
   User = iolist_to_binary(proplists:get_value(user, Options)),
   Password = iolist_to_binary(proplists:get_value(password, Options)),
   CAFile = proplists:get_value(cafile, Options),
+  CertVerifyFun = proplists:get_value(ssl_verify, Options),
   Timeout = proplists:get_value(timeout, Options, infinity),
   case send_request_1(Procedure, Arguments, Host, Port, User, Password,
-                      CAFile, Timeout) of
+                      CAFile, CertVerifyFun, Timeout) of
     {ok, Conn, single_return} ->
       case ssl_recv(Conn, Timeout) of
         {ok, [{<<"result">>, Result}]} ->
@@ -126,9 +131,10 @@ request(Procedure, Arguments, Options) ->
   User = iolist_to_binary(proplists:get_value(user, Options)),
   Password = iolist_to_binary(proplists:get_value(password, Options)),
   CAFile = proplists:get_value(cafile, Options),
+  CertVerifyFun = proplists:get_value(ssl_verify, Options),
   Timeout = proplists:get_value(timeout, Options, infinity),
   case send_request_1(Procedure, Arguments, Host, Port, User, Password,
-                      CAFile, Timeout) of
+                      CAFile, CertVerifyFun, Timeout) of
     {ok, Conn, _ResultType} ->
       {ok, Conn};
     {error, Reason} ->
@@ -139,8 +145,8 @@ request(Procedure, Arguments, Options) ->
 %% sequence of operations to send call request {{{
 
 send_request_1(Procedure, Arguments, Host, Port, User, Password,
-               CAFile, Timeout) ->
-  case ssl_connect(Host, Port, CAFile, Timeout) of
+               CAFile, CertVerifyFun, Timeout) ->
+  case ssl_connect(Host, Port, CAFile, CertVerifyFun, Timeout) of
     {ok, Conn} ->
       send_request_2(Procedure, Arguments, User, Password, Conn, Timeout);
     {error, Reason} ->
@@ -264,22 +270,39 @@ cancel(Handle) ->
 
 %% @doc Connect to specified host/port with SSL/TLS protocol.
 
--spec ssl_connect(ssl:host(), integer(), file:name() | undefined, timeout()) ->
+-spec ssl_connect(ssl:host(), integer(), file:name() | undefined,
+                  {fun(), term()}, timeout()) ->
   {ok, ssl:sslsocket()} | {error, term()}.
 
-ssl_connect(Host, Port, CAFile, Timeout) ->
-  case CAFile of
-    undefined -> CAOpts = [];
-    _ -> CAOpts = [{cacertfile, CAFile}]
+ssl_connect(Host, Port, CAFile, CertVerifyFun, Timeout) ->
+  case {CAFile, CertVerifyFun} of
+    {undefined, undefined} ->
+      CertOpts = [{verify, verify_none}];
+    {undefined, {_Fun,_Arg}} ->
+      CertOpts = [
+        {verify, verify_peer},
+        {verify_fun, CertVerifyFun}
+      ];
+    {_Path, undefined} ->
+      CertOpts = [
+        {verify, verify_peer},
+        {depth, ?CA_VERIFY_DEPTH},
+        {cacertfile, CAFile}
+      ];
+    {_Path, {_Fun,_Arg}} ->
+      CertOpts = [
+        {verify, verify_peer},
+        {depth, ?CA_VERIFY_DEPTH},
+        {cacertfile, CAFile},
+        {verify_fun, CertVerifyFun}
+      ]
   end,
   SocketOpts = [
     {versions, [tlsv1, 'tlsv1.1']}, % TODO: TLS 1.2 and later
     {active, false},
-    {packet, line},
-    {verify, verify_none}
+    {packet, line}
   ],
-  % TODO: verify certificate against CA file
-  case ssl:connect(Host, Port, CAOpts ++ SocketOpts, Timeout) of
+  case ssl:connect(Host, Port, CertOpts ++ SocketOpts, Timeout) of
     {ok, Conn} ->
       {ok, Conn};
     {error, Reason} ->

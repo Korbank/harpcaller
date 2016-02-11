@@ -22,11 +22,23 @@ default_timeout = 600
 # terminated [seconds]
 max_exec_time = 600
 
-# file with all recognized CAs; if not defined, no CA checking will be
-# performed when connecting to client
-#ca_file = "/etc/ssl/certs/ca-certificates.crt"
-# file with all recognized client certificates (may not exist)
-# TODO: define meaning of the file
+#-----------------------------------------------------------------------------
+# SSL options
+
+# NOTE 1: If a CA was appended to `ca_file', it may be necessary to restart
+# dispatcher daemon for changes to take effect. `known_certs_file' doesn't
+# have this inconvenience.
+#
+# NOTE 2: If both `ca_file' and `known_certs_file' are specified, it's enough
+# for a certificate to either be valid or be whitelisted.
+
+# file with all recognized CAs
+# if specified, any certificate signed by one of these CAs will be accepted
+#ca_file = "/etc/korrpcdid/ca_certs.pem"
+
+# file with whitelisted client certificates (may not exist)
+# if specified, any certificate from this list will be accepted, even if its
+# issuer CA was not recognized
 known_certs_file = "/etc/korrpcdid/known_certs.pem"
 
 #-----------------------------------------------------------------------------

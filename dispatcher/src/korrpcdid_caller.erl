@@ -57,6 +57,11 @@
               {korrpcdid_call_queue:queue_name(),
                 Concurrency :: pos_integer()}}.
 
+-record(ssl_verify, {
+  ca_path_valid = true :: boolean(),
+  expected_hostname = any :: binary() | any
+}).
+
 % }}}
 %%%---------------------------------------------------------------------------
 
@@ -511,15 +516,51 @@ start_request(_State = #state{request = {Procedure, ProcArgs, Hostname},
   case korrpcdid_hostdb:resolve(Hostname) of
     {Hostname, Address, Port, {User, Password} = _Credentials} ->
       korrpc_sdb:started(StreamTable),
-      % TODO: use `Credentials'
+      case application:get_env(ca_file) of
+        {ok, CAFile} -> CAOpts = [{cafile, CAFile}];
+        undefined    -> CAOpts = []
+      end,
+      VerifyFun = {fun verify_cert/3, #ssl_verify{}},
       RequestOpts = [
         {host, Address}, {port, Port},
-        {user, User}, {password, Password}
+        {user, User}, {password, Password},
+        {ssl_verify, VerifyFun}
       ],
-      korrpc:request(Procedure, ProcArgs, RequestOpts);
+      korrpc:request(Procedure, ProcArgs, RequestOpts ++ CAOpts);
     none ->
       {error, unknown_host}
   end.
+
+%%%---------------------------------------------------------------------------
+
+%% @doc SSL certificate verification function.
+%%
+%% @todo Logging `Event'
+
+verify_cert(_Cert, {extension, _} = _Event, Options) ->
+  % ignore extensions whatsoever
+  {unknown, Options};
+
+verify_cert(_Cert, _Event, _Options = #ssl_verify{ca_path_valid = false}) ->
+  % there was an invalid certificate somewhere above, even if accepted
+  % conditionally; signal it's an unknown CA
+  {fail, {error, unknown_ca}};
+
+verify_cert(Cert, {bad_cert, _} = Event, Options) ->
+  % if the certificate is in known certs store, accept it conditionally:
+  % if it's a leaf, then the cert is valid, but if it's used as a CA,
+  % verification will be rejected
+  NewOptions = Options#ssl_verify{ca_path_valid = false},
+  case korrpcdid_x509_store:known(Cert) of
+    true  -> {valid, NewOptions};
+    false -> {fail, Event}
+  end;
+
+verify_cert(_Cert, valid = _Event, Options) ->
+  {valid, Options};
+
+verify_cert(_Cert, valid_peer = _Event, Options) ->
+  {valid, Options}. % TODO: verify hostname
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

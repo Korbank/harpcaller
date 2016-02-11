@@ -46,11 +46,9 @@ reload() ->
   gen_server:call(?MODULE, reload).
 
 %% @doc Check if the certificate is known by certificate store.
-%%
-%%   When certificate store couldn't be loaded, `empty' is returned.
 
 -spec known(korrpcdid_x509:certificate()) ->
-  boolean() | empty.
+  boolean().
 
 known(Certificate = #'OTPCertificate'{}) ->
   % do at least some of the work in caller
@@ -148,10 +146,7 @@ handle_call({check_presence, CertSubject, Cert} = _Request, _From,
       NewCertStore = State#state.certs,
       NewState = State
   end,
-  Reply = case NewState of
-    #state{last_change = undefined} -> empty;
-    #state{} -> has(CertSubject, Cert, NewCertStore)
-  end,
+  Reply = has(CertSubject, Cert, NewCertStore),
   {reply, Reply, NewState};
 
 %% unknown calls
