@@ -30,6 +30,9 @@ remote calls. In more sophisticated cases, you may create a subclass of
 
 Examples of using decorators::
 
+    from harpd.proc import procedure, streaming_procedure, Result
+    import time
+
     @procedure
     def sum_and_difference(a, b):
         return {"sum": a + b, "difference": a - b}
