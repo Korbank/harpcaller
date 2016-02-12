@@ -9,6 +9,8 @@ formatters:
   timestamped:
     format: "%(asctime)s %(message)s"
     datefmt: "%Y-%m-%d %H:%M:%S"
+  syslog:
+    format: "harpd[%(process)d]: %(message)s"
 handlers:
   stderr:
     class: logging.StreamHandler
@@ -16,3 +18,8 @@ handlers:
     #level: CRITICAL
     #filters: [...]
     stream: ext://sys.stderr
+  syslog:
+    class: logging.handlers.SysLogHandler
+    address: /dev/log  # unix socket on Linux
+    facility: daemon
+    formatter: syslog
