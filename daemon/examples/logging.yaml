@@ -1,10 +1,7 @@
 version: 1
 root:
-  #level: ~ # optional; DEBUG, INFO, WARNING, ERROR, CRITICAL, NOTSET
-  level: NOTSET
-  #propagate: true  # optional; ignored for root logger
-  #filters: [...]   # optional
-  #handlers: [stderr, file]
+  level: NOTSET    # optional; DEBUG, INFO, WARNING, ERROR, CRITICAL, NOTSET
+  #filters: [...]  # optional
   handlers: [stderr]
 formatters:
   terse:
@@ -16,6 +13,6 @@ handlers:
   stderr:
     class: logging.StreamHandler
     formatter: terse
-    #level:    CRITICAL
+    #level: CRITICAL
     #filters: [...]
-    stream:   ext://sys.stderr
+    stream: ext://sys.stderr
