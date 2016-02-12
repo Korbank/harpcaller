@@ -6,3 +6,11 @@ time:
   * connection forwarding (e.g. harpcaller -> harpd -> harpd)
     * intermediate harpd only forwards data left and right
     * raw TCP connection (SSL inside SSL)
+
+== configuration ==
+
+  * @procedure -- options for the procedure
+    * uid, gid
+    * max_exec_time
+    * CWD?
+  * $PYTHONPATH in config.yaml
