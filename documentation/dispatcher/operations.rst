@@ -352,5 +352,31 @@ In most uses it should not be necessary to fill this file.
 Hosts registry filler script
 ----------------------------
 
-**TODO**
+Registry filler script is executed in regular intervals to fill the database
+of hosts that are available for RPC calls. This script is supposed to write
+JSON hashes with information about hosts, one JSON per line.
+
+Filler script can be written in any language (e.g. in Python or shell), as
+long as it can be executed as a command. It can safely assume that it won't be
+called such that two instances would run at the same time (it can take longer
+than ``host_db_refresh`` to execute the script). Any not recognized line will
+be ignored.
+
+If the script exits with non-zero code, hosts registry *will not* be updated.
+
+The information the script prints should contain name of the host, its IP
+address and port, and credentials (user and password) to authenticate request.
+A single JSON hash could look like this (broken down for reading convenience):
+
+.. code-block:: yaml
+
+    {
+      "hostname": "web01.example.net",
+      "address": "10.8.14.2",
+      "port": 4306,
+      "credentials": {
+        "user": "rpc-system",
+        "password": "caixaudakuPus6yo"
+      }
+    }
 
