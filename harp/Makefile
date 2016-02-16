@@ -1,7 +1,7 @@
 #!/usr/bin/make -f
 
 all:
-	: nothing
+	python setup.py build
 
 install:
 	mkdir -p $(DESTDIR)
