@@ -13,7 +13,7 @@ Controlling the daemon (:ref:`ref <harpcaller-daemon>`):
 .. code-block:: none
 
     harpcallerd [options] start
-    harpcallerd [options] wait-for-start
+    harpcallerd [options] status
     harpcallerd [options] stop
     harpcallerd [options] reload-config
     harpcallerd [options] dist-erl-start
@@ -81,12 +81,17 @@ Controlling the daemon
       File to write PID to. Since all communication is passed through
       controlling socket, this is mostly informative.
 
-.. program:: harpcallerd wait-for-start
+.. program:: harpcallerd status
 
-``harpcallerd wait-for-start [--timeout=SECONDS]``
-   Wait for HarpCaller daemon to start. If the controlling socket does not
-   exist at this point yet, command waits for it to appear (at most for
-   *SECONDS*).
+``harpcallerd status [--wait [--timeout=SECONDS]]``
+   Check HarpCaller daemon's status (``"running"`` or ``"not running"``),
+   possibly waiting for HarpCaller to start. If the controlling socket does
+   not exist at this point yet and :option:`--wait` was specified, command
+   waits for it to appear (at most for *SECONDS*).
+
+   .. option:: --wait
+
+      Wait for daemon to confirm successful start.
 
    .. option:: --timeout=SECONDS
 

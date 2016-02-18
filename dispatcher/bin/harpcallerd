@@ -7,7 +7,7 @@
 
 %% TODO: reload code
 -record(cmd, {
-  op :: start | wait_for_start | stop | reload_config |
+  op :: start | status | stop | reload_config |
         list_jobs | cancel_job |
         list_hosts | refresh_hosts |
         list_queues | list_queue | cancel_queue |
@@ -28,7 +28,7 @@ help(IO) ->
   io:fwrite(IO, "HarpCaller daemon.~n", []),
   io:fwrite(IO, "Controlling daemon:~n", []),
   io:fwrite(IO, "  ~s [--socket=...] start [--debug] [--config=...] [--pidfile=...]~n", [Script]),
-  io:fwrite(IO, "  ~s [--socket=...] wait-for-start [--timeout=...]~n", [Script]),
+  io:fwrite(IO, "  ~s [--socket=...] status [--wait [--timeout=...]]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] stop [--timeout=...] [--print-pid]~n", [Script]),
   io:fwrite(IO, "  ~s [--socket=...] reload-config~n", [Script]),
   io:fwrite(IO, "Jobs:~n", []),
@@ -107,12 +107,29 @@ cmd(_Cmd = #cmd{op = start, socket = Socket, options = Options}) ->
   end;
 
 %% wait for daemon to start completely
-cmd(_Cmd = #cmd{op = wait_for_start, socket = Socket, options = Options}) ->
+cmd(_Cmd = #cmd{op = status, socket = Socket, options = Options}) ->
   Timeout = proplists:get_value("timeout", Options, infinity),
-  Command = harpcaller_command_handler:command_wait_for_start(),
-  case indira:retry_send_one_command(indira_unix, Socket, Command, Timeout) of
+  Wait = proplists:get_value("wait", Options, false),
+  Command = harpcaller_command_handler:command_status(Wait),
+  SendResult = case Wait of
+    true ->
+      indira:retry_send_one_command(indira_unix, Socket, Command, Timeout);
+    false ->
+      indira:send_one_command(indira_unix, Socket, Command, Timeout)
+  end,
+  case SendResult of
     {ok, Reply} ->
-      harpcaller_command_handler:reply_wait_for_start(Reply);
+      case harpcaller_command_handler:reply_status(Reply) of
+        {ok, Status} ->
+          io:fwrite("~s~n", [Status]),
+          ok;
+        {error, Reason} ->
+          {error, Reason}
+      end;
+    {error, enoent} ->
+      % no control socket, obviously the daemon is stopped (not an error)
+      io:fwrite("not running~n", []),
+      ok;
     {error, Reason} ->
       {error, format_send_error(Reason)}
   end;
@@ -303,6 +320,11 @@ store_arg(single, ["--print-pid" | _], Cmd = #cmd{options = Options}) ->
     options = [{"print-pid", true} | Options]
   };
 
+store_arg(single, ["--wait" | _], Cmd = #cmd{options = Options}) ->
+  _NewCmd = Cmd#cmd{
+    options = [{"wait", true} | Options]
+  };
+
 store_arg(single, ["--debug" | _], Cmd = #cmd{options = Options}) ->
   _NewCmd = Cmd#cmd{
     options = [{"debug", true} | Options]
@@ -339,8 +361,8 @@ store_arg(_, ["--" ++ _ = Option | _], _Cmd) ->
 
 store_arg(_, ["start" | _],          Cmd = #cmd{op = undefined}) ->
   _NewCmd = Cmd#cmd{op = start};
-store_arg(_, ["wait-for-start" | _], Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = wait_for_start};
+store_arg(_, ["status" | _], Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = status};
 store_arg(_, ["stop" | _],           Cmd = #cmd{op = undefined}) ->
   _NewCmd = Cmd#cmd{op = stop};
 store_arg(_, ["reload-config" | _],  Cmd = #cmd{op = undefined}) ->

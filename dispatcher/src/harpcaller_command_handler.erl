@@ -11,8 +11,8 @@
 %% gen_indira_command callbacks
 -export([handle_command/2]).
 %% daemon control
--export([command_wait_for_start/0, command_stop/0, command_reload_config/0]).
--export([reply_wait_for_start/1, reply_stop/1, reply_reload_config/1]).
+-export([command_status/1, command_stop/0, command_reload_config/0]).
+-export([reply_status/1, reply_stop/1, reply_reload_config/1]).
 %% RPC job control
 -export([command_list_jobs/0, command_cancel_job/1]).
 -export([reply_list_jobs/1, reply_cancel_job/1]).
@@ -40,9 +40,17 @@ handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
   init:stop(),
   [{result, ok}, {pid, list_to_binary(os:getpid())}];
 
-handle_command([{<<"command">>, <<"wait_for_start">>}] = _Command, _Args) ->
-  wait_for_start(),
-  [{result, ok}];
+handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, true}] = _Command,
+               _Args) ->
+  true = wait_for_start(),
+  [{result, <<"running">>}];
+
+handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, false}] = _Command,
+               _Args) ->
+  case is_started() of
+    true  -> [{result, <<"running">>}];
+    false -> [{result, <<"not running">>}]
+  end;
 
 handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
   [{error, <<"command not implemented yet">>}];
@@ -108,9 +116,17 @@ handle_command(_Command, _Args) ->
 %%----------------------------------------------------------
 
 wait_for_start() ->
+  case is_started() of
+    true -> true;
+    false -> timer:sleep(100), wait_for_start()
+  end.
+
+is_started() ->
+  % TODO: replace this with better check (there could be a problem with
+  % booting)
   case whereis(harpcaller_sup) of
-    Pid when is_pid(Pid) -> ok;
-    undefined -> timer:sleep(100), wait_for_start()
+    Pid when is_pid(Pid) -> true;
+    _ -> false
   end.
 
 list_jobs_info() ->
@@ -165,11 +181,11 @@ list_queue(QueueName) ->
 %%----------------------------------------------------------
 %% daemon control {{{
 
-command_wait_for_start() ->
-  [{command, wait_for_start}].
+command_status(Wait) when Wait == true; Wait == false ->
+  [{command, status}, {wait, Wait}].
 
-reply_wait_for_start([{<<"result">>, <<"ok">>}] = _Reply) -> ok;
-reply_wait_for_start(Reply) -> {error, invalid_reply(Reply)}.
+reply_status([{<<"result">>, Status}] = _Reply) -> {ok, Status};
+reply_status(Reply) -> {error, invalid_reply(Reply)}.
 
 command_stop() ->
   [{command, stop}].
