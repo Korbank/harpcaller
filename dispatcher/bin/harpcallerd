@@ -253,7 +253,7 @@ send_command(Socket, Command, ReplyParseFun) ->
 -spec format_send_error(term()) ->
   iolist().
 
-format_send_error(timeout = _Reason) -> "";
+format_send_error(timeout = _Reason) -> "operation timed out";
 format_send_error(Reason) -> inet:format_error(Reason).
 
 %% }}}
