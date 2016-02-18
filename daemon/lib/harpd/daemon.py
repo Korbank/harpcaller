@@ -329,6 +329,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             logger.info(log("no such procedure",
                             client_address = self.client_address[0],
                             client_port = self.client_address[1],
+                            user = user,
                             procedure = proc_name))
             e = RequestHandler.RequestError(
                 "no_such_procedure",
@@ -350,6 +351,8 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             logger.info(log("invalid argument list in request",
                             client_address = self.client_address[0],
                             client_port = self.client_address[1],
+                            user = user,
+                            procedure = proc_name,
                             # XXX: `arguments' comes from deserialized JSON,
                             # so it can be serialized back to JSON safely
                             argument = arguments))
@@ -367,6 +370,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 client_port = self.client_address[1],
                 procedure = proc_name,
                 streaming = isinstance(procedure, proc.StreamingProcedure),
+                user = user,
             ))
             if isinstance(procedure, proc.StreamingProcedure):
                 self.send({"harp": 1, "stream_result": True})
@@ -386,6 +390,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 client_address = self.client_address[0],
                 client_port = self.client_address[1],
                 procedure = proc_name,
+                user = user,
                 error = e.struct()["error"],
             ))
             try:
@@ -396,6 +401,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             logger.info(log("aborted due to shutdown",
                             client_address = self.client_address[0],
                             client_port = self.client_address[1],
+                            user = user,
                             procedure = proc_name))
             e = RequestHandler.RequestError(
                 "shutdown",
