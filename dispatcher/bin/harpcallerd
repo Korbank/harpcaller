@@ -136,6 +136,9 @@ cmd(_Cmd = #cmd{op = stop, socket = Socket, options = Options}) ->
       % system shut down without allowing the reply to pass through, handle
       % this situation as well
       ok;
+    {error, enoent} ->
+      % daemon is not running, so let's consider it stopped
+      ok;
     {error, Reason} ->
       {error, format_send_error(Reason)}
   end;
