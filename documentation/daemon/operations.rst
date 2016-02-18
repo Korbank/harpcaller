@@ -31,9 +31,13 @@ Available options
 
    path to YAML file with logging configuration
 
+.. option:: --syslog
+
+   log to syslog instead of *STDERR* (overriden by :option:`--logging`)
+
 .. option:: -d, --daemon
 
-   detach from terminal and run as a daemon
+   detach from terminal and run as a daemon (implies :option:`--syslog`)
 
 .. option:: -p FILE, --pidfile=FILE
 

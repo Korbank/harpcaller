@@ -30,8 +30,12 @@ parser.add_option(
     help = "YAML/JSON file with logging configuration", metavar = "FILE",
 )
 parser.add_option(
+    "--syslog", dest = "syslog", action = "store_true", default = False,
+    help = "log to syslog instead of STDERR (overriden by --logging)",
+)
+parser.add_option(
     "-d", "--daemon", dest = "detach", action = "store_true", default = False,
-    help = "run in background",
+    help = "run in background (implies --syslog)",
 )
 parser.add_option(
     "-p", "--pidfile", dest = "pidfile", default = None,
@@ -39,6 +43,9 @@ parser.add_option(
 )
 
 (options, args) = parser.parse_args()
+
+if options.detach:
+    options.syslog = True
 
 #if len(args) == 0:
 #    parser.error("argument not provided")
@@ -50,6 +57,22 @@ parser.add_option(
 if options.logging is not None:
     with open(options.logging) as f:
         logging_config = yaml.safe_load(f)
+elif options.syslog:
+    logging_config = {
+        "version": 1,
+        "root": { "level": "INFO", "handlers": ["syslog"] },
+        "formatters": {
+            "syslog": { "format": "harpd[%(process)d]: %(message)s" },
+        },
+        "handlers": {
+            "syslog": {
+                "class": "logging.handlers.SysLogHandler",
+                "formatter": "syslog",
+                "facility": "daemon",
+                "address": "/dev/log", # unix socket on Linux
+            },
+        },
+    }
 else:
     logging_config = {
         "version": 1,
