@@ -118,8 +118,7 @@ class JSONConnection(object):
 
     def close(self):
         '''
-        Close connection. To connect again, use
-        :func:`JSONConnection.connect()`.
+        Close connection. To connect again, use :meth:`connect()`.
         '''
         if self.sockf is not None:
             self.sockf.close()
