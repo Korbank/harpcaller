@@ -8,6 +8,7 @@ import logging
 import logging.config
 import yaml
 import signal
+import sys
 
 #-----------------------------------------------------------------------------
 # parse command line options {{{
@@ -49,6 +50,33 @@ if options.detach:
 
 #if len(args) == 0:
 #    parser.error("argument not provided")
+
+# }}}
+#-----------------------------------------------------------------------------
+# configuration and environment {{{
+
+with open(options.config) as f:
+    configuration = yaml.safe_load(f)
+
+# XXX: Python path has to be adjusted before (a) loading procedures module,
+# (b) loading authentication module, and (c) configuring logging, because each
+# and every of these can use custom code
+path = configuration.get("python", {}).get("path")
+if isinstance(path, (str, unicode)):
+    sys.path.append(path)
+elif isinstance(path, (tuple, list)):
+    sys.path.extend(path)
+elif isinstance(path, dict):
+    if "prepend" in path:
+        if isinstance(path["prepend"], (str, unicode)):
+            sys.path.insert(0, path["prepend"])
+        elif isinstance(path["prepend"], (tuple, list)):
+            sys.path = list(path["prepend"]) + sys.path
+    if "append" in path:
+        if isinstance(path["append"], (str, unicode)):
+            sys.path.append(path["append"])
+        elif isinstance(path["append"], (tuple, list)):
+            sys.path.extend(path["append"])
 
 # }}}
 #-----------------------------------------------------------------------------
@@ -97,13 +125,13 @@ logging.config.dictConfig(logging_config)
 
 # }}}
 #-----------------------------------------------------------------------------
-# configuration and procedures {{{
-
-with open(options.config) as f:
-    configuration = yaml.safe_load(f)
+# procedures and authentication modules {{{
 
 # TODO: check configuration["authentication"]["module"] for being a string
 
+# XXX: loading procedures and authentication should be performed after logging
+# was configured, because what if user decides to use logging within the
+# procedures?
 with harpd.module.ModuleLoader() as loader:
     procedures_module = loader.load("harpd.__procedures__", options.procs)
     procedures = {

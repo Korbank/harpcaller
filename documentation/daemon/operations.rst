@@ -50,10 +50,11 @@ Configuration
 General configuration
 ---------------------
 
-There are two main categories of options to be set in
+There are three main categories of options to be set in
 :file:`/etc/harpd/harpd.conf` file. One is network configuration, like bind
-address and port or SSL/TLS certificate and private key, the other is request
-authentication.
+address and port or SSL/TLS certificate and private key, another is request
+authentication, and the last one is Python environment configuration (this one
+is optional).
 
 When specifying a X.509 certificate with CA chain, you should put in the file
 the leaf certificate first, followed by the certificate of CA that signed the
@@ -65,6 +66,18 @@ Authentication specifies a field ``"module"``, which is a name of a Python
 module that will be used to authenticate requests. See
 :ref:`harpd-auth-modules` for list of modules shipped with :program:`harpd`.
 
+Python environment may specify additional module locations. To do this, config
+should contain ``python.path`` variable. The simplest form is either a single
+path or a list of paths, in which case the paths will be *appended* to
+:obj:`sys.path`. More sophisticated way is to specify ``python.path.prepend``
+and/or ``python.path.append`` (each to be, again, either a single path or
+a list of paths), which gives some control over where the paths will be put.
+
+``sys.path`` is adjusted *before* configuring logging, loading procedures, or
+loading authentication module. This mechanism may be used to keep any
+additional libraries in a place different than Python's usual module search
+path.
+
 Configuration for :program:`harpd` should look like this (YAML):
 
 .. code-block:: yaml
@@ -74,6 +87,16 @@ Configuration for :program:`harpd` should look like this (YAML):
       port: 4306
       certfile: /etc/harpd/harpd.cert.pem
       keyfile:  /etc/harpd/harpd.key.pem
+
+    # equivalent to:
+    # python:
+    #   path:
+    #     append:
+    #       - ...
+    python:
+      path:
+        - /etc/harpd/pylib
+        - /usr/local/lib/harpd
 
     authentication:
       module: harpd.auth.passfile

@@ -4,6 +4,16 @@ network:
   certfile: /etc/harpd/harpd.cert.pem
   keyfile:  /etc/harpd/harpd.key.pem
 
+#python:
+#  path: /etc/harpd/pylib
+#  path:
+#    - /etc/harpd/pylib
+#    - /usr/local/lib/harpd
+#  path:
+#    prepend:
+#      - /usr/local/lib/harpd
+#    append: /etc/harpd/pylib
+
 authentication:
   module: harpd.auth.passfile
   file: /etc/harpd/users.txt
