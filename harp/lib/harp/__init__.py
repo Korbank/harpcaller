@@ -3,10 +3,12 @@
 .. autoclass:: HarpCaller
    :members:
 
-   .. automethod:: __call__
+   .. automethod:: __getattr__
 
 .. autoclass:: RemoteServer
    :members:
+
+   .. automethod:: __call__
 
 .. autoclass:: RemoteProcedure
    :members:
@@ -236,17 +238,14 @@ class RemoteError(HarpException):
 class HarpCaller(object):
     '''
     Dispatcher server representation.
-
-    This object is callable. When called, returns object that represents
-    a target RPC server, along with its configuration.
     '''
     def __init__(self, host, port = 3502):
         '''
         :param host: address of dispatcher
         :param port: port of dispatcher
         '''
-        self.host = host
-        self.port = port
+        self._host = host
+        self._port = port
 
     def job(self, job_id):
         '''
@@ -267,7 +266,7 @@ class HarpCaller(object):
 
         Connect to dispatcher server, to send a request and read a reply.
         '''
-        return JSONConnection(self.host, self.port)
+        return JSONConnection(self._host, self._port)
 
     def request(self, req):
         '''
@@ -285,8 +284,27 @@ class HarpCaller(object):
                 raise CommunicationError("unexpected EOF")
             return response
 
-    def __call__(self, host, queue = None, concurrency = None,
-                 timeout = None, max_exec_time = None):
+    def __getattr__(self, host):
+        '''
+        :return: target server representation
+        :rtype: :class:`RemoteServer`
+
+        Convenience method to get a statically-known host. Returned context is
+        not configured with any job options. To change that, use
+        :meth:`RemoteServer.__call__()`::
+
+            rpc = HarpCaller("...")
+            # get nginx' status on web01, no job configuration
+            rpc.web01.nginx_status().get()
+            # enqueue nginx restart request
+            rpc.web01(queue = {"service": "nginx", "host": "web01"}) \\
+               .restart_nginx()
+
+        See also: :meth:`host()`.
+        '''
+        return self.host(host)
+
+    def host(self, host, **kwargs):
         '''
         :param host: target RPC server
         :type host: string
@@ -304,15 +322,16 @@ class HarpCaller(object):
         Prepare context (target and job options) for calling a remote
         procedure on a server.
         '''
-        return RemoteServer(self, host, queue, concurrency,
-                            timeout, max_exec_time)
+        result = RemoteServer(self, host)
+        result(**kwargs)
+        return result
 
     def __repr__(self):
         return "<%s.%s %s:%d>" % (
             self.__class__.__module__,
             self.__class__.__name__,
-            self.host,
-            self.port,
+            self._host,
+            self._port,
         )
 
 # }}}
@@ -328,25 +347,44 @@ class RemoteServer(object):
     :param dispatcher: dispatcher instance
     :type dispatcher: :class:`HarpCaller`
     :param hostname: name of the target server
-    :param queue: name of a queue to wait in
-    :param concurrency: number of simultaneously running jobs in the queue
-    :param timeout: maximum time between consequent reads from the job
-    :param max_exec_time: maximum time the job is allowed to take
 
-    See also :meth:`HarpCaller.__call__()`.
+    See also :meth:`__call__()`.
 
     .. automethod:: __str__
 
     .. automethod:: __getattr__
     '''
-    def __init__(self, dispatcher, hostname, queue, concurrency,
-                 timeout, max_exec_time):
+    def __init__(self, dispatcher, hostname):
         self._dispatcher = dispatcher
         self._hostname = hostname
-        self._queue = queue
-        self._concurrency = concurrency
-        self._timeout = timeout
-        self._max_exec_time = max_exec_time
+        self._queue = None
+        self._concurrency = None
+        self._timeout = None
+        self._max_exec_time = None
+
+    def __call__(self, **kwargs):
+        '''
+        :param queue: name of a queue to wait in
+        :type queue: dict
+        :param concurrency: number of simultaneously running jobs in the queue
+        :type concurrency: positive integer
+        :param timeout: maximum time between consequent reads from the job
+        :type timeout: positive integer (seconds)
+        :param max_exec_time: maximum time the job is allowed to take
+        :type max_exec_time: positive integer (seconds)
+        :return: :obj:`self`
+
+        Adjust job options for this host.
+        '''
+        if "queue" in kwargs:
+            self._queue = kwargs["queue"]
+        if "concurrency" in kwargs:
+            self._concurrency = kwargs["concurrency"]
+        if "timeout" in kwargs:
+            self._timeout = kwargs["timeout"]
+        if "max_exec_time" in kwargs:
+            self._max_exec_time = kwargs["max_exec_time"]
+        return self
 
     def _call_options(self):
         result = {
@@ -376,7 +414,7 @@ class RemoteServer(object):
         procedure. To submit a call request, one can use::
 
            rpc = HarpCaller(dispatcher_address)
-           host = rpc("remote-server") # this is `RemoteServer' instance
+           host = rpc.host("remote-server") # this is `RemoteServer' instance
            host.my_remote_function_name(arg1, arg2, ...)
         '''
         return RemoteProcedure(self._dispatcher, self, procedure)

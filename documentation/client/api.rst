@@ -14,7 +14,10 @@ Example usage
 
    rpc = harp.HarpCaller("localhost")
 
-   job = rpc(host = "localhost", queue = {"foo": "bar"}, max_exec_time = 15).stream_infinity()
+   host = rpc.localhost(queue = {"foo": "bar"}, max_exec_time = 15)
+   # or: `host = rpc.host(host = "localhost", queue = ...)'
+   # or simply: `host = rpc.localhost', if no job configuration is needed
+   job = host.stream_infinity()
    for msg in job.follow(since = 0):
        print json.dumps(msg)
 
