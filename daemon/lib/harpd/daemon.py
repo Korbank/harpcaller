@@ -439,9 +439,11 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 
         Read call request from socket.
         '''
-        # TODO: catch read errors
         read_buffer = []
-        fragment = self.request.read(self.server.max_line)
+        try:
+            fragment = self.request.read(self.server.max_line)
+        except socket.error, e:
+            raise RequestHandler.RequestError("read_error", str(e))
         while "\n" not in fragment and fragment != "":
             read_buffer.append(fragment)
             fragment = self.request.read(self.server.max_line)
@@ -548,6 +550,7 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
 
         logger.info(log("listening on SSL socket", host = host, port = port))
         self.timeout = None
+        self.read_timeout = 10
         self.socket = ssl.SSLSocket(
             socket.socket(socket.AF_INET, socket.SOCK_STREAM),
             server_side = True,
@@ -606,6 +609,7 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
             "new client connected",
             client_address = addr, client_port = port
         ))
+        client_socket.settimeout(self.read_timeout)
         return (client_socket, (addr, port))
 
     # TODO: handle error (when RequestHandler.handle() raises an exception)
