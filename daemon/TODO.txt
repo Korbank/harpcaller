@@ -9,8 +9,4 @@ time:
 
 == configuration ==
 
-  * @procedure -- options for the procedure
-    * uid, gid
-    * max_exec_time
-    * CWD?
-  * $PYTHONPATH in config.yaml
+  * default UID/GID
