@@ -153,7 +153,10 @@ class JSONConnection(object):
         line = self.sockf.readline()
         if line == "":
             return None
-        return json.loads(line)
+        try:
+            return json.loads(line)
+        except ValueError, e:
+            raise CommunicationError(str(e)) # invalid JSON object
 
 # }}}
 #-----------------------------------------------------------------------------
