@@ -1012,7 +1012,9 @@ class HarpProcedure(object):
             # wait for the next message
             result = self._receive()
             self._close()
-            if "result" in result:
+            if reply is None:
+                raise CommunicationError("unexpected EOF")
+            elif "result" in result:
                 return result["result"]
             elif "error" in result:
                 error = result["error"]
