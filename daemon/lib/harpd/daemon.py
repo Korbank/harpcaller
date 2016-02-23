@@ -21,6 +21,8 @@ import json
 import SocketServer
 import logging
 import os
+import pwd
+import grp
 import sys
 import atexit
 
@@ -372,6 +374,8 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 streaming = isinstance(procedure, proc.StreamingProcedure),
                 user = user,
             ))
+            self.setguid(procedure.uid, procedure.gid)
+            # TODO: setup timeout (procedure.timeout)
             if isinstance(procedure, proc.StreamingProcedure):
                 self.send({"harp": 1, "stream_result": True})
                 for packet in procedure(*args, **kwargs):
@@ -507,6 +511,42 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             # nobody to report send errors to, but it will abort a possible
             # iteration
             raise RequestHandler.RequestError("network_error", str(e))
+
+    def setguid(self, uid, gid):
+        '''
+        :param uid: user/UID to change to
+        :type uid: string, integer, or ``None``
+        :param gid: group/UID to change to
+        :type gid: string, integer, or ``None``
+
+        Set UID/GID (and supplementary groups) to whatever was provided. If
+        UID was specified as a name and GID is ``None``, GID defaults to
+        primary group of the user. In any other case ``None`` means "don't
+        change".
+        '''
+        if isinstance(uid, (str, unicode)):
+            try:
+                user = pwd.getpwnam(uid)
+            except Exception, e:
+                raise RequestHandler.RequestError("system_error", str(e))
+            uid = user.pw_uid
+            if gid is None:
+                gid = user.pw_gid
+        if isinstance(gid, (str, unicode)):
+            try:
+                group = grp.getgrnam(gid)
+            except Exception, e:
+                raise RequestHandler.RequestError("system_error", str(e))
+            gid = group.gr_gid
+
+        try:
+            if gid is not None:
+                os.setgid(gid)
+                os.setgroups([gid])
+            if uid is not None:
+                os.setuid(uid)
+        except OSError, e:
+            raise RequestHandler.RequestError("system_error", str(e))
 
 # }}}
 #-----------------------------------------------------------------------------
