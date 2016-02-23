@@ -12,6 +12,9 @@ Network server and daemonization operations
 .. autoclass:: Daemon
    :members:
 
+.. autoclass:: TimeoutQueue
+   :members:
+
 '''
 #-----------------------------------------------------------------------------
 
@@ -25,6 +28,9 @@ import pwd
 import grp
 import sys
 import atexit
+import signal
+import heapq
+import errno
 
 from log import message as log
 import proc
@@ -274,6 +280,13 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 
             return { "harp": 1, "error": error }
 
+    class Timeout(Exception):
+        '''
+        Signal that execution time expired. This exception is thrown from
+        *SIGXCPU* handler.
+        '''
+        pass
+
     # }}}
     #-------------------------------------------------------
 
@@ -375,7 +388,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 user = user,
             ))
             self.setguid(procedure.uid, procedure.gid)
-            # TODO: setup timeout (procedure.timeout)
+            self.set_timeout(procedure.timeout)
             if isinstance(procedure, proc.StreamingProcedure):
                 self.send({"harp": 1, "stream_result": True})
                 for packet in procedure(*args, **kwargs):
@@ -401,6 +414,18 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 self.send(e.struct())
             except:
                 pass # ignore error sending errors
+        except RequestHandler.Timeout:
+            logger.info(log("execution timeout exceeded",
+                            client_address = self.client_address[0],
+                            client_port = self.client_address[1],
+                            user = user,
+                            procedure = proc_name))
+            e = RequestHandler.RequestError(
+                "timeout",
+                "maximum execution time exceeded",
+            )
+            self.send(e.struct())
+            return
         except SystemExit:
             logger.info(log("aborted due to shutdown",
                             client_address = self.client_address[0],
@@ -512,6 +537,18 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             # iteration
             raise RequestHandler.RequestError("network_error", str(e))
 
+    def set_timeout(self, timeout):
+        '''
+        :param timeout: timeout or ``None`` if no timeout applicable
+
+        Setup a timeout for this process.
+        '''
+        if timeout is not None:
+            def signal_timeout(signum, stack_frame):
+                raise RequestHandler.Timeout()
+            signal.signal(signal.SIGXCPU, signal_timeout)
+        self.server.set_timeout(timeout)
+
     def setguid(self, uid, gid):
         '''
         :param uid: user/UID to change to
@@ -552,6 +589,101 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 #-----------------------------------------------------------------------------
 # SSLServer {{{
 
+#-------------------------------------------------------
+# TimeoutQueue {{{
+
+class TimeoutQueue:
+    '''
+    Combined queue for delayed kill requests, interprocess channel for such
+    requests, and a system-independent clock.
+    '''
+
+    def __init__(self):
+        self.sock_read  = None # for parent process
+        self.sock_write = None # for child process
+        (self.sock_read, self.sock_write) = TimeoutQueue.socketpair()
+        self.queue = [] # heapq
+        # system time can change, and keeping track of a monotonic clock is
+        # easy enough
+        self.time = 0
+
+    def tick(self):
+        '''
+        Advance internal system-independent clock by one second.
+        '''
+        self.time += 1
+
+    def kill_ready(self):
+        '''
+        :return: list of PIDs
+
+        Pop from the queue all the processes that requested being killed.
+
+        Note that this queue does not keep track of which children terminated
+        and which are alive. Caller needs to check this manually (a process
+        could have spawned with the same PID as some terminated child).
+        '''
+        result = []
+        while len(self.queue) > 0 and self.queue[0][0] <= self.time:
+            (kill_time, pid) = heapq.heappop(self.queue)
+            result.append(pid)
+        return result
+
+    @staticmethod
+    def socketpair():
+        '''
+        :return: (read_end, write_end)
+
+        Create a pair of AF_UNIX sockets. These sockets are unidirectional.
+        '''
+        # datagram sockets guarantee that send() operation is atomic
+        (sock_r, sock_w) = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+        # shutdown half of the channel, so it can't be accidentally mixed up
+        sock_r.shutdown(socket.SHUT_WR)
+        sock_w.shutdown(socket.SHUT_RD)
+        return (sock_r, sock_w)
+
+    def close(self):
+        '''
+        Close the sockets.
+        '''
+        if self.sock_read is not None:
+            self.sock_read.close()
+            self.sock_read = None
+        if self.sock_write is not None:
+            self.sock_write.close()
+            self.sock_write = None
+
+    def receive_kill_requests(self):
+        '''
+        Read all the delayed kill requests sent from child processes and add
+        them to internal queue.
+
+        Use :meth:`kill_ready()` to check which kill requests are ready to be
+        realized.
+        '''
+        try:
+            while True:
+                request = self.sock_read.recv(256, socket.MSG_DONTWAIT)
+                (_kill, pid, after) = request.split()
+                heapq.heappush(self.queue, (self.time + int(after), int(pid)))
+        except socket.error, e:
+            if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
+                # any other error than "no more data to read this time"
+                raise
+
+    def timeout(self, after):
+        '''
+        :param after: number of seconds after which the process should be
+            killed
+
+        Request a delayed kill.
+        '''
+        self.sock_write.send("kill %d %d" % (os.getpid(), after))
+
+# }}}
+#-------------------------------------------------------
+
 class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
     '''
     :param host: address to bind to
@@ -584,9 +716,20 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         self.procedures = procs
         self.authdb = authdb
 
+        # XXX: this needs to be after super(...)
+        # SocketServer.ForkingMixIn inconveniently leaves this as `None'
+        # instead of filling it in constructor
+        self.active_children = []
+
         # necessary to detect if this is the child or parent process, so child
         # won't forward signal to its older siblings
         self.parent_pid = os.getpid()
+
+        # queue and communication channel for children that want an execution
+        # timeout
+        self.timeout_queue = TimeoutQueue()
+        signal.signal(signal.SIGALRM, self.handle_tick)
+        signal.alarm(1)
 
         logger.info(log("listening on SSL socket", host = host, port = port))
         self.timeout = None
@@ -609,6 +752,7 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         ``sys.exit(0)``, in daemon's main process additionally forwarding
         signal to all the children.
         '''
+        signal.alarm(0) # reset alarm, if any (surely true in parent)
         in_parent = (self.parent_pid == os.getpid())
         if in_parent:
             logger = logging.getLogger("harpd.daemon.server")
@@ -617,12 +761,11 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         if in_parent:
             logger.info(log("received signal, forwarding to children and exiting",
                             signal = signum))
-            if self.active_children is not None:
-                for pid in self.active_children:
-                    try:
-                        os.kill(pid, signum)
-                    except OSError:
-                        pass
+            for pid in self.active_children:
+                try:
+                    os.kill(pid, signum)
+                except OSError:
+                    pass
         else:
             logger.info(log("received signal, exiting", signal = signum))
         sys.exit(0)
@@ -724,6 +867,42 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         # NOTE: closing happens both in parent and child processes; it should
         # merely close the file descriptor
         client_socket.close()
+
+    def set_timeout(self, timeout):
+        '''
+        :param timeout: time after which the process will be killed or ``None``
+
+        Request a delayed kill and close the communication channel with parent
+        process.
+        '''
+        if timeout is not None:
+            self.timeout_queue.timeout(timeout)
+        self.timeout_queue.close()
+
+    def handle_tick(self, signum, stack_frame):
+        '''
+        Signal handler for *SIGALRM* signal loop. The handler advances clock
+        in :class:`TimeoutQueue`, makes it receive any outstanding delayed
+        kill requests, and kills any children that have their timeouts fired
+        (*SIGXCPU* is the signal used here).
+
+        Function sets up another timer to fire in one second.
+        '''
+        self.timeout_queue.tick()
+        self.timeout_queue.receive_kill_requests()
+        kill_ready = set(self.timeout_queue.kill_ready())
+        # XXX: it's important to go through `self.active_children' instead of
+        # using `kill_ready' directly, as a child could have terminated
+        # already (TimeoutQueue doesn't track these events) and some other
+        # process could get the PID
+        for pid in self.active_children:
+            if pid in kill_ready:
+                # TODO: make the children process groups leaders
+                try:
+                    os.kill(pid, signal.SIGXCPU)
+                except OSError:
+                    pass
+        signal.alarm(1) # schedule another tick
 
 # }}}
 #-----------------------------------------------------------------------------

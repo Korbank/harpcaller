@@ -16,7 +16,8 @@ remote calls. In more sophisticated cases, you may create a subclass of
    Whatever the function returns, it will be sent as a result.
 
    The second form allows to set options, like UID/GID to run as (either
-   numeric or name) or time the function execution will take.
+   numeric or name) or time the function execution will take. Timeout will be
+   signaled with a *SIGXCPU* signal (sensible default handler is provided).
 
    See :class:`Procedure`.
 
@@ -32,7 +33,8 @@ remote calls. In more sophisticated cases, you may create a subclass of
    :class:`Result`, reported returned value will be simply ``None``.
 
    The second form allows to set options, like UID/GID to run as (either
-   numeric or name) or time the function execution will take.
+   numeric or name) or time the function execution will take. Timeout will be
+   signaled with a *SIGXCPU* signal (sensible default handler is provided).
 
    See :class:`StreamingProcedure`, :class:`Result`.
 
