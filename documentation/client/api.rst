@@ -7,6 +7,9 @@ Python client API
 Example usage
 =============
 
+HarpCaller interaction
+----------------------
+
 .. code-block:: python
 
    import json
@@ -33,6 +36,27 @@ Example usage
    elif result is harp.CALL_CANCELLED:
        print "cancelled"
    elif ...
+
+:program:`harpd` interaction
+----------------------------
+
+.. code-block:: python
+
+   import json
+   import harp
+
+   server = harp.HarpServer(
+       host = "localhost",
+       user = "username",
+       password = "secret",
+   )
+   print server.current_time()
+   for msg in server.logs_in_next_minutes(10):
+       if isinstance(msg, harp.Result):
+           # last value, nothing more will be returned
+           print json.dumps(msg.value)
+       else:
+           print "log message:", json.dumps(msg)
 
 
 .. _client-lib-api:

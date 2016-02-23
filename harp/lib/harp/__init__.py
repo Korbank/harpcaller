@@ -1,5 +1,12 @@
 #!/usr/bin/python
 '''
+HarpCaller interface
+~~~~~~~~~~~~~~~~~~~~
+
+These classes are intended for interacting with HarpCaller, which means that
+the interface they provide is asynchronous. They also allow to retrieve
+results from already finished calls.
+
 .. autoclass:: HarpCaller
    :members:
 
@@ -18,12 +25,50 @@
 .. autoclass:: RemoteCall
    :members:
 
-.. autoclass:: JSONConnection
-   :members:
-
 .. autodata:: CALL_NOT_FINISHED
 
 .. autodata:: CALL_CANCELLED
+
+:program:`harpd` interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These classes allow direct communication with :program:`harpd`. The
+interaction is synchronous and ephemeral, unlike that with HarpCaller.
+
+.. autoclass:: HarpServer
+   :members:
+
+   .. automethod:: __getattr__
+
+.. autoclass:: HarpProcedure
+   :members:
+
+   .. automethod:: __call__
+
+.. autoclass:: HarpStreamIterator
+   :members:
+
+.. autoclass:: Result
+   :members:
+
+   .. attribute:: value
+
+      wrapped value
+
+Networked JSON interface
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Classes to simplify working with linewise JSON protocols.
+
+.. autoclass:: JSONConnection
+   :members:
+
+.. autoclass:: JSONSSLConnection
+   :members:
+   :inherited-members:
+
+Exceptions
+~~~~~~~~~~
 
 .. autoexception:: HarpException
    :members:
@@ -44,6 +89,7 @@
 #-----------------------------------------------------------------------------
 
 import socket
+import ssl
 import json
 
 #-----------------------------------------------------------------------------
@@ -158,6 +204,50 @@ class JSONConnection(object):
         except ValueError, e:
             raise CommunicationError(str(e)) # invalid JSON object
 
+class JSONSSLConnection(JSONConnection):
+    '''
+    SSL connection, reading and writing JSON lines.
+
+    Object of this class is a valid context manager, so it can be used this
+    way::
+
+       with JSONSSLConnection(host, port, "/etc/ssl/certs/ca.pem") as conn:
+           conn.send({"key": "value"})
+           reply = conn.receive()
+    '''
+    def __init__(self, host, port, ca_file = None):
+        '''
+        :param host: address of dispatcher server
+        :param port: port of dispatcher server
+        :param ca_file: file with CA certificates, or ``None`` if no
+            verification should be performed
+        '''
+        self.ca_file = ca_file
+        super(JSONSSLConnection, self).__init__(host, port)
+
+    def connect(self):
+        '''
+        Connect to the address specified in constructor.
+        Newly created :class:`JSONSSLConnection` objects are already
+        connected.
+        '''
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        try:
+            s.connect((self.host, self.port))
+            if self.ca_file is not None:
+                ss = ssl.wrap_socket(s, ca_certs = self.ca_file,
+                                     cert_reqs = ssl.CERT_REQUIRED)
+            else:
+                ss = ssl.wrap_socket(s)
+            self.sockf = ss.makefile()
+            s.close()
+        except socket.error, e:
+            s.close()
+            raise CommunicationError(
+                "can't connect to %s:%s: %s" % (self.host, self.port, str(e))
+            )
+
 # }}}
 #-----------------------------------------------------------------------------
 # exceptions {{{
@@ -234,6 +324,10 @@ class RemoteError(HarpException):
         self.data = data
 
 # }}}
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+# HarpCaller communication
 #-----------------------------------------------------------------------------
 # HarpCaller {{{
 
@@ -772,5 +866,249 @@ class RemoteCall(object):
         )
 
 # }}}
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+# harpd communication
+#-----------------------------------------------------------------------------
+# HarpServer {{{
+
+class HarpServer(object):
+    '''
+    :param host: address of :program:`harpd`
+    :param port: port of :program:`harpd`
+    :param user: username to authenticate as
+    :param password: password for the username
+    :param ca_file: file with CA certificates to verify server's
+        certificate against (or ``None`` for no verification)
+
+    :program:`harpd` server representation.
+
+    Typical usage::
+
+        server = HarpServer(
+            host = "example.net",
+            user = "username",
+            password = "some password",
+            ca_file = "trusted_ca.cert.pem",
+        )
+        result = server.some_method("arg1", "arg2")
+    '''
+
+    def __init__(self, host, user, password, port = 4306, ca_file = None):
+        '''
+        '''
+        self._host = host
+        self._port = port
+        self._creds = {"user": user, "password": password}
+        self._ca_file = ca_file
+
+    def __getattr__(self, procedure):
+        '''
+        :param procedure: name of a procedure to call
+        :return: procedure representation
+        :rtype: :class:`HarpProcedure`
+
+        Prepare a call to a procedure.
+        '''
+        return HarpProcedure(self, procedure)
+
+    def _connect(self):
+        return JSONSSLConnection(
+            host = self._host,
+            port = self._port,
+            ca_file = self._ca_file,
+        )
+
+    def __repr__(self):
+        return "<%s.%s %s:%d>" % (
+            self.__class__.__module__,
+            self.__class__.__name__,
+            self._host,
+            self._port,
+        )
+
+# }}}
+#-----------------------------------------------------------------------------
+# HarpProcedure {{{
+
+class HarpProcedure(object):
+    '''
+    Procedure on a :program:`harpd` server.
+
+    Instances of this class are callable, as a normal procedure would be.
+    '''
+    def __init__(self, server, name):
+        '''
+        :param server: :program:`harpd` where the procedure is to be executed
+        :type server: :class:`HarpServer`
+        :param name: procedure name
+        :type name: string
+        '''
+        self._server = server
+        self._name = name
+        self._sock = None
+
+    def __call__(self, *args, **kwargs):
+        '''
+        :param args: list of positional arguments (can't be used with
+            non-empty :obj:`kwargs`)
+        :param kwargs: list of keyword arguments (can't be used with non-empty
+            :obj:`args`)
+        :return: remote procedure's result (single result) or an iterable
+            object (streamed result)
+        :rtype: :mod:`json`-serializable data or :class:`HarpStreamIterator`
+        :throws: :class:`HarpException` or its subclass
+
+        Execute the procedure and get its result.
+
+        If the remote procedure returns single result, this method simply
+        returns this value (dict, list, str/unicode, int/long, float, bool, or
+        ``None``; or simply: anything other than :class:`HarpStreamIterator`).
+
+        If the remote procedure returns a streamed result, an iterator
+        (:class:`HarpStreamIterator`) is returned. This iterator returns
+        a sequence of values (JSON-serializable, as described for single
+        result), with the last value always being a :class:`Result` instance.
+
+        If the RPC call returns an exception, :class:`HarpException` is
+        thrown. Any communication error (including unexpected EOF, which
+        would otherwise result in missing :class:`Result`) is raised as
+        (possibly subclass of) :class:`HarpException`.
+        '''
+        if len(args) > 0 and len(kwargs) > 0:
+            raise HarpException("mixed keyword and positional arguments")
+        if len(kwargs) > 0:
+            call_args = kwargs
+        else:
+            call_args = args
+
+        self._sock = self._server._connect()
+        self._send({
+            "harp": 1,
+            "auth": self._server._creds,
+            "procedure": self._name,
+            "arguments": call_args,
+        })
+
+        # {"harp": 1, "stream_result": True | False}
+        reply = self._receive()
+        if reply is None:
+            raise CommunicationError("unexpected EOF")
+        elif "error" in reply:
+            self._close()
+            error = reply["error"]
+            raise RemoteError(
+                error["type"],
+                error["message"],
+                error.get("data"),
+            )
+        elif reply["stream_result"]:
+            # delegate yields to a subroutine, since we can't mix non-empty
+            # returns and yields (and remember to wrap the iterator in an
+            # easily-distinguishable class)
+            return HarpStreamIterator(self._read_stream())
+        else: # not reply["stream_result"]
+            # wait for the next message
+            result = self._receive()
+            self._close()
+            if "result" in result:
+                return result["result"]
+            elif "exception" in result:
+                error = reply["exception"]
+                raise RemoteException(
+                    error["type"],
+                    error["message"],
+                    error.get("data"),
+                )
+            raise CommunicationError("invalid message carrying call result")
+
+    def _close(self):
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except:
+                pass # ignore any and all errors
+            self._sock = None
+
+    def _send(self, request):
+        try:
+            self._sock.send(request)
+        except socket.error, e:
+            self._close()
+            raise CommunicationError(str(e))
+
+    def _receive(self):
+        try:
+            return self._sock.receive()
+        except socket.error, e:
+            self._close()
+            raise CommunicationError(str(e))
+
+    def _read_stream(self):
+        while True:
+            rec = self._receive()
+            if rec is None:
+                self._close()
+                raise CommunicationError("unexpected EOF")
+            if "stream" in rec:
+                yield rec["stream"]
+            elif "result" in rec:
+                self._close()
+                yield Result(rec["result"])
+                return
+            elif "exception" in rec:
+                self._close()
+                error = reply["exception"]
+                raise RemoteException(
+                    error["type"],
+                    error["message"],
+                    error.get("data"),
+                )
+            else:
+                self._close()
+                raise CommunicationError("invalid message carrying call result")
+
+    def __repr__(self):
+        return "<%s.%s %s:%d.%s()>" % (
+            self.__class__.__module__,
+            self.__class__.__name__,
+            self._server._host,
+            self._server._port,
+            self._name,
+        )
+
+# }}}
+#-----------------------------------------------------------------------------
+# HarpStreamIterator and Result {{{
+
+class HarpStreamIterator(object):
+    '''
+    Iterator wrapper for iterators to easily tell apart single results and
+    streamed results of call to a procedure on a :class:`HarpServer`.
+    '''
+    def __init__(self, orig_iterator):
+        self.orig = orig_iterator
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.orig.next()
+
+class Result(object):
+    '''
+    :param value: returned end value of a streamed result
+
+    Container for end result returned from streaming procedure.
+
+    Returned from :class:`HarpStreamIterator` as a last value in iteration.
+    '''
+    def __init__(self, value):
+        self.value = value
+
+# }}}
+#-----------------------------------------------------------------------------
+
 #-----------------------------------------------------------------------------
 # vim:ft=python:foldmethod=marker
