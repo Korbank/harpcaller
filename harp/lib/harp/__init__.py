@@ -1014,8 +1014,15 @@ class HarpProcedure(object):
             self._close()
             if "result" in result:
                 return result["result"]
+            elif "error" in result:
+                error = result["error"]
+                raise RemoteException(
+                    error["type"],
+                    error["message"],
+                    error.get("data"),
+                )
             elif "exception" in result:
-                error = reply["exception"]
+                error = result["exception"]
                 raise RemoteException(
                     error["type"],
                     error["message"],
@@ -1057,6 +1064,14 @@ class HarpProcedure(object):
                 self._close()
                 yield Result(rec["result"])
                 return
+            elif "error" in rec:
+                self._close()
+                error = reply["error"]
+                raise RemoteError(
+                    error["type"],
+                    error["message"],
+                    error.get("data"),
+                )
             elif "exception" in rec:
                 self._close()
                 error = reply["exception"]
