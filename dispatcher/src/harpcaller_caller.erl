@@ -172,12 +172,22 @@ get_result(JobID) ->
 %%   {@type {terminated, harpcaller:job_id(), cancelled | Result@}}, where
 %%   `Result' has the same form and meaning as returned value of {@link
 %%   harp:recv/1}.
+%%
+%%   Caller will have a monitor set, so if the process carrying out the job
+%%   dies unexpectedly, the caller will receive ``{'DOWN', Monitor, process,
+%%   _Pid, Reason}'' message.
 
 -spec follow_stream(harpcaller:job_id()) ->
-  ok | undefined.
+  {ok, Monitor :: reference()} | undefined.
 
 follow_stream(JobID) ->
-  request(JobID, {follow, self()}).
+  case request(JobID, {follow, self()}) of
+    {ok, Pid} ->
+      MonRef = erlang:monitor(process, Pid),
+      {ok, MonRef};
+    undefined ->
+      undefined
+  end.
 
 %% @doc Retrieve information about RPC call.
 %%   `{error,_}' is returned in case of read errors. `undefined' is returned
@@ -327,7 +337,7 @@ handle_call({follow, Pid} = _Request, _From,
             State = #state{followers = Followers}) ->
   Ref = erlang:monitor(process, Pid),
   ets:insert(Followers, {Pid, Ref}),
-  {reply, ok, State, 0};
+  {reply, {ok, self()}, State, 0};
 
 handle_call(job_id = _Request, _From, State = #state{job_id = JobID}) ->
   {reply, JobID, State, 0};

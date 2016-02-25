@@ -128,7 +128,7 @@ handle_info(timeout = _Message,
     #state{mode = follow, recent = 0} ->
       % special case when there's no need to read the history of stream
       case harpcaller_caller:follow_stream(JobID) of
-        ok ->
+        {ok, _MonRef} ->
           harpcaller_log:info(?LOG_CAT, "job still running, reading the stream result",
                               [{client, {term, Peer}}, {job, {str, JobID}},
                                {wait, true}]),
@@ -147,7 +147,7 @@ handle_info(timeout = _Message,
       case read_stream(State) of
         {ok, NextId} ->
           case Follow of
-            ok ->
+            {ok, _MonRef} ->
               % TODO: if this operation specified an ID in the future, skip
               % those as well (probably in `handle_info({record, ...})')
               harpcaller_log:info(?LOG_CAT, "job still running, reading the stream result",

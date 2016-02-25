@@ -120,7 +120,7 @@ handle_info(timeout = _Message,
             State = #state{job_id = JobID, client = Client, wait = true}) ->
   {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
   case harpcaller_caller:follow_stream(JobID) of
-    ok ->
+    {ok, _MonRef} ->
       % consume+ignore all the stream, waiting for the result
       harpcaller_log:info(?LOG_CAT, "job still running, waiting for the result",
                           [{client, {term, Peer}}, {job, {str, JobID}},
