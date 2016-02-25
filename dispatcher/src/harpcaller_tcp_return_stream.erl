@@ -26,6 +26,7 @@
 -record(state, {
   client :: gen_tcp:socket(),
   job_id :: harpcaller:job_id(),
+  job_monitor :: reference(),
   mode :: follow | read,
   since  :: non_neg_integer() | undefined,
   recent :: non_neg_integer() | undefined
@@ -110,6 +111,18 @@ handle_info({record, JobID, Id, Record} = _Message,
     {error, Reason} -> {stop, Reason, State}
   end;
 
+handle_info({'DOWN', Monitor, process, Pid, Reason} = _Message,
+            State = #state{job_id = JobID, client = Client,
+                           job_monitor = Monitor}) ->
+  % the process carrying out the job died
+  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
+  harpcaller_log:info(?LOG_CAT, "job died",
+                      [{client, {term, Peer}}, {job, {str, JobID}},
+                       {pid, {term, Pid}}, {reason, {term, Reason}}]),
+  FormattedResult = format_result(missing),
+  send_response(State, FormattedResult),
+  {stop, normal, State};
+
 handle_info({terminated, JobID, Result} = _Message,
             State = #state{job_id = JobID, client = Client}) ->
   % got our result; send it to the client
@@ -128,11 +141,12 @@ handle_info(timeout = _Message,
     #state{mode = follow, recent = 0} ->
       % special case when there's no need to read the history of stream
       case harpcaller_caller:follow_stream(JobID) of
-        {ok, _MonRef} ->
+        {ok, MonRef} ->
           harpcaller_log:info(?LOG_CAT, "job still running, reading the stream result",
                               [{client, {term, Peer}}, {job, {str, JobID}},
                                {wait, true}]),
-          {noreply, State};
+          NewState = State#state{job_monitor = MonRef},
+          {noreply, NewState};
         undefined ->
           Result = harpcaller_caller:get_result(JobID),
           FormattedResult = format_result(Result),
@@ -147,14 +161,15 @@ handle_info(timeout = _Message,
       case read_stream(State) of
         {ok, NextId} ->
           case Follow of
-            {ok, _MonRef} ->
+            {ok, MonRef} ->
               % TODO: if this operation specified an ID in the future, skip
               % those as well (probably in `handle_info({record, ...})')
               harpcaller_log:info(?LOG_CAT, "job still running, reading the stream result",
                                   [{client, {term, Peer}},
                                    {job, {str, JobID}}, {wait, true}]),
               flush_stream(JobID, NextId),
-              {noreply, State};
+              NewState = State#state{job_monitor = MonRef},
+              {noreply, NewState};
             undefined ->
               Result = harpcaller_caller:get_result(JobID),
               FormattedResult = format_result(Result),

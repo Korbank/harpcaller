@@ -26,6 +26,7 @@
 -record(state, {
   client :: gen_tcp:socket(),
   job_id :: harpcaller:job_id(),
+  job_monitor :: reference(),
   wait :: boolean()
 }).
 
@@ -94,6 +95,18 @@ handle_info({record, JobID, _Id, _Record} = _Message,
   % streamed response -- ignore this message
   {noreply, State};
 
+handle_info({'DOWN', Monitor, process, Pid, Reason} = _Message,
+            State = #state{job_id = JobID, client = Client,
+                           job_monitor = Monitor}) ->
+  % the process carrying out the job died
+  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
+  harpcaller_log:info(?LOG_CAT, "job died",
+                      [{client, {term, Peer}}, {job, {str, JobID}},
+                       {pid, {term, Pid}}, {reason, {term, Reason}}]),
+  FormattedResult = format_result(missing),
+  send_response(State, FormattedResult),
+  {stop, normal, State};
+
 handle_info({terminated, JobID, Result} = _Message,
             State = #state{job_id = JobID, client = Client}) ->
   % got our result; send it to the client
@@ -120,12 +133,13 @@ handle_info(timeout = _Message,
             State = #state{job_id = JobID, client = Client, wait = true}) ->
   {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
   case harpcaller_caller:follow_stream(JobID) of
-    {ok, _MonRef} ->
+    {ok, MonRef} ->
       % consume+ignore all the stream, waiting for the result
       harpcaller_log:info(?LOG_CAT, "job still running, waiting for the result",
                           [{client, {term, Peer}}, {job, {str, JobID}},
                            {wait, true}]),
-      {noreply, State};
+      NewState = State#state{job_monitor = MonRef},
+      {noreply, NewState};
     undefined ->
       % no process to follow, so it must terminated already
       Value = harpcaller_caller:get_result(JobID),
