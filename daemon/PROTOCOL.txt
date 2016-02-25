@@ -34,13 +34,13 @@ Call request is immediately acknowledged with a message indicating whether
 there will be a streamed result or not. The message looks as follows:
   {"harp": 1, "stream_result": true | false}
 
-Transport-level error
-~~~~~~~~~~~~~~~~~~~~~
+Transport-level and daemon operational errors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If the request is ill-formatted, contains invalid data, points to
 a non-existing function, carries incorrect number of arguments, or there are
 other server-side problems with execution of the procedure, error is returned
-instead of acknowledgement:
+instead of or after acknowledgement (possibly in the middle of stream result):
   {"harp": 1, "error": {"type": "...", "message": "...", "data": ...}}
 
 "type" indicates the kind of the error, in similar fashion as `errno' in unix
@@ -89,5 +89,5 @@ instead of {"result":...}:
 Meaning and format of these fields is similar to protocol-level error
 message. "data" is an optional field here as well.
 
-Streamed result always ends with either {"result":...} or {"exception":...}
-message.
+Streamed result always ends with either {"result":...}, {"exception":...}, or
+{"error":..., "harp": 1} message.
