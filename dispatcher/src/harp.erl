@@ -240,6 +240,13 @@ recv(Handle, Timeout) ->
     {ok, [{<<"result">>, Result}]} ->
       ssl_close(Handle),
       {result, Result};
+    {ok, [{<<"error">>, ErrorDescription}, {<<"harp">>, 1}]} ->
+      ssl_close(Handle),
+      case format_error(ErrorDescription) of
+        {_,_,_} = Error -> {error, Error};
+        {_,_}   = Error -> {error, Error};
+        _ -> {error, bad_protocol}
+      end;
     {ok, [{<<"exception">>, ExceptionDesc}]} ->
       ssl_close(Handle),
       case format_error(ExceptionDesc) of
