@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
-# HarpRPC documentation build configuration file, copied and manually adjusted
-# from already generated config.
+# HarpCaller documentation build configuration file, copied and manually
+# adjusted from already generated config.
 #
 # This file is execfile()d with the current directory set to its containing dir.
 #
@@ -40,7 +40,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'Harp RPC system'
+project = u'HarpCaller RPC system'
 copyright = u'2016, Korbank S.A.'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -178,7 +178,7 @@ html_static_path = ['static']
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'HarpRPCdoc'
+htmlhelp_basename = 'HarpCallerdoc'
 
 
 # -- Options for LaTeX output --------------------------------------------------
@@ -197,7 +197,7 @@ latex_elements = {
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'harprpc.tex', u'HarpRPC Documentation',
+  ('index', 'harprpc.tex', u'HarpCaller Documentation',
    u'Korbank S.A.', 'manual'),
 ]
 
@@ -227,7 +227,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'harprpc', u'HarpRPC Documentation',
+    ('index', 'harprpc', u'HarpCaller Documentation',
      [u'Korbank S.A.'], 1)
 ]
 
@@ -241,8 +241,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  ('index', 'HarpRPC', u'HarpRPC Documentation',
-   u'Korbank S.A.', 'HarpRPC', 'One line description of project.',
+  ('index', 'HarpCaller', u'HarpCaller Documentation',
+   u'Korbank S.A.', 'HarpCaller', 'HarpCaller RPC system',
    'Miscellaneous'),
 ]
 

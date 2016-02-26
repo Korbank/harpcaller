@@ -1,9 +1,5 @@
-**************************
-High-level system overview
-**************************
-
-.. toctree::
-   :maxdepth: 2
+HarpCaller system
+=================
 
 HarpCaller is a system that allows calling procedures on remote machines and
 collects their results of various types. Procedures to be called are part of
@@ -35,22 +31,20 @@ or procedure's arguments, so it is possible to issue the same call request
 twice or more, each time to a different queue.
 
 
-System architecture
-===================
+Architecture
+------------
 
 HarpCaller system is divided into three parts: daemon, dispatcher, and client
 library.
 
-Daemon
-------
+### Daemon
 
-:program:`harpd` daemon is a service running on every server that can be
-a target for RPC call. It is meant to carry out any procedure that is called
-and send the value that the procedure returned as a response to RPC call. Code
-for the procedures available to daemon is supplied as daemon's configuration.
+harpd daemon is a service running on every server that can be a target for RPC
+call. It is meant to carry out any procedure that is called and send the value
+that the procedure returned as a response to RPC call. Code for the procedures
+available to daemon is supplied as daemon's configuration.
 
-Dispatcher
-----------
+### Dispatcher
 
 HarpCaller (request dispatcher) is a single central service tasked with
 connecting to daemons to pass them call requests and receive call results, and
@@ -62,16 +56,25 @@ the place where queueing occurs.
 Dispatcher is also the service that client library talks to directly in
 typical use.
 
-Client library
---------------
+### Client library
 
-Python :mod:`harp` module is a client implementation of the protocol to talk
-to HarpCaller and to :program:`harpd` services (*note*: :program:`harpd` uses
-slightly different protocol). The primary use case for this interface was to
-allow issuing commands to servers from within a web application, but it should
-be equally convenient for other uses.
+Python *harp* module is a client implementation of the protocol to talk
+to HarpCaller and to harpd services (*note*: harpd uses slightly different
+protocol). The primary use case for this interface was to allow issuing
+commands to servers from within a web application, but it should be equally
+convenient for other uses.
 
-Module documentation: :ref:`client-lib-api`
 
-Example usage: :ref:`client-lib-examples`
+Contact and License
+-------------------
 
+HarpCaller is written by Stanislaw klekot <dozzie at jarowit.net> for
+Korbank S.A <http://korbank.com/>.
+The primary distribution point is <https://github.com/korbank/harpcaller>.
+
+HarpCaller is distributed under GNU GPL v3 license. See LICENSE file for
+details.
+
+In case you wondered, GPL terms do not apply automatically to the RPC
+procedures you provide to harpd as its configuration just because you imported
+*harpd.proc* module.
