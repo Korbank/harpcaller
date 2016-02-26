@@ -36,3 +36,4 @@ time:
     * set `dynamic' and handle `get_modules' system command (how?)
     * how does code upgrade work for process that needs to upgrade module it
       doesn't use?
+  * harpcaller_caller: when dies, log this (harpcaller_log:error())
