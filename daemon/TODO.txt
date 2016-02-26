@@ -7,6 +7,12 @@ time:
     * intermediate harpd only forwards data left and right
     * raw TCP connection (SSL inside SSL)
 
+== starting/stopping/restarting ==
+
+  * bin/harpd --check-config
+  * /etc/init.d/harpd try-restart
+    * harpd --check-config && (stop; start)
+
 == configuration ==
 
   * default UID/GID
