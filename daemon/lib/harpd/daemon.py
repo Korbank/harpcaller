@@ -793,6 +793,10 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
             client_address = addr, client_port = port
         ))
         client_socket.settimeout(self.read_timeout)
+        client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        # XXX: these two are Linux specific
+        client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+        client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30)
         return (client_socket, (addr, port))
 
     # TODO: handle error (when RequestHandler.handle() raises an exception)
