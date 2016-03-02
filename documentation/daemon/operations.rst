@@ -31,6 +31,11 @@ Available options
 
    path to YAML file with logging configuration
 
+.. option:: -t, --test
+
+   test configuration for correctness (config file, procedures module, and
+   logging configuration, if provided)
+
 .. option:: --syslog
 
    log to syslog instead of *STDERR* (overriden by :option:`--logging`)

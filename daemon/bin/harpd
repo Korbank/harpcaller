@@ -9,6 +9,7 @@ import logging.config
 import yaml
 import signal
 import sys
+import os
 
 #-----------------------------------------------------------------------------
 # parse command line options {{{
@@ -31,6 +32,11 @@ parser.add_option(
     help = "YAML/JSON file with logging configuration", metavar = "FILE",
 )
 parser.add_option(
+    "-t", "--test", dest = "test", action = "store_true", default = False,
+    help = "test configuration (--config, --procedures, and --logging)"
+           " for correctness and exit",
+)
+parser.add_option(
     "--syslog", dest = "syslog", action = "store_true", default = False,
     help = "log to syslog instead of STDERR (overriden by --logging)",
 )
@@ -50,6 +56,136 @@ if options.detach:
 
 #if len(args) == 0:
 #    parser.error("argument not provided")
+
+# }}}
+#-----------------------------------------------------------------------------
+# config checking {{{
+
+if options.test:
+    def error(fmt, *args):
+        line = fmt % args
+        if not line.endswith("\n"):
+            line += "\n"
+        sys.stderr.write(line)
+        sys.exit(1)
+
+    try:
+        with open(options.config) as f:
+            configuration = yaml.safe_load(f)
+    except Exception, e:
+        error("error reading configuration file: %s", str(e))
+
+    #-------------------------------------------------------
+    # network configuration {{{
+
+    if not isinstance(configuration, dict):
+        error("invalid configuration: not a hash")
+    if "network" not in configuration:
+        error("invalid network configuration: not a hash")
+    network = configuration["network"]
+    if not isinstance(network.get("address", ""), (str, unicode)):
+        error("invalid network.address: not a string")
+    if not isinstance(network.get("port", 4306), int):
+        error("invalid network.port: not an integer")
+    if not isinstance(network.get("certfile"), (str, unicode)):
+        error("invalid network.certfile: not a path")
+    if not isinstance(network.get("keyfile"), (str, unicode)):
+        error("invalid network.keyfile: not a path")
+    if not os.path.isfile(network["certfile"]):
+        error("invalid network.certfile: file doesn't exist")
+    if not os.path.isfile(network["keyfile"]):
+        error("invalid network.keyfile: file doesn't exist")
+
+    # }}}
+    #-------------------------------------------------------
+    # Python runtime configuration {{{
+
+    python = configuration.get("python", {})
+    if not isinstance(python, dict):
+        error("Python runtime configuration is not a hash")
+
+    def valid_string_or_string_list(path):
+        if isinstance(path, (str, unicode)):
+            return True
+        elif isinstance(path, (tuple, list)):
+            return all((isinstance(e, (str, unicode)) for e in path))
+        return False
+
+    if "path" not in python:
+        pass # OK
+    elif valid_string_or_string_list(python["path"]):
+        pass # OK
+    elif isinstance(python["path"], dict):
+        if "prepend" in python["path"] and \
+           not valid_string_or_string_list(python["path"]["prepend"]):
+            error("invalid python.path.prepend value")
+        if "append" in python["path"] and \
+           not valid_string_or_string_list(python["path"]["append"]):
+            error("invalid python.path.append value")
+    else:
+        error("invalid python.path value")
+
+    # }}}
+    #-------------------------------------------------------
+    # authentication {{{
+
+    if "authentication" not in configuration:
+        error("missing authentication configuration")
+
+    authentication = configuration["authentication"]
+
+    if not isinstance(authentication, dict):
+        error("invalid authentication configuration: not a hash")
+
+    if "module" not in authentication:
+        error("authentication module not specified")
+    if not isinstance(authentication["module"], (str, unicode)):
+        error("invalid authentication.module: not a string")
+
+    try:
+        with harpd.module.ModuleLoader() as loader:
+            authmod = loader.load(authentication["module"])
+    except Exception, e:
+        error("authentication module %s couldn't be loaded: %s",
+              authentication["module"], str(e))
+
+    try:
+        authmod.create.__call__ # try getting `authmod.create()' function
+    except AttributeError:
+        error("authentication module doesn't implement proper interface")
+
+    # }}}
+    #-------------------------------------------------------
+    # procedures {{{
+
+    try:
+        with harpd.module.ModuleLoader() as loader:
+            loader.load("harpd.__procedures__", options.procs)
+    except Exception, e:
+        error("error loading procedures module: %s", str(e))
+
+    # }}}
+    #-------------------------------------------------------
+    # logging {{{
+
+    if options.logging is not None:
+        try:
+            with open(options.logging) as f:
+                logging_config = yaml.safe_load(f)
+        except Exception, e:
+            error("error reading logging configuration file: %s", str(e))
+
+        try:
+            logging.config.dictConfig(logging_config)
+        except Exception, e:
+            error("logging configuration error: %s", str(e))
+
+    # }}}
+    #-------------------------------------------------------
+
+    # when test execution got this far, it haven't found any errors
+    sys.stderr.write("config OK\n")
+    sys.exit(0)
 
 # }}}
 #-----------------------------------------------------------------------------
@@ -126,8 +262,6 @@ logging.config.dictConfig(logging_config)
 # }}}
 #-----------------------------------------------------------------------------
 # procedures and authentication modules {{{
-
-# TODO: check configuration["authentication"]["module"] for being a string
 
 # XXX: loading procedures and authentication should be performed after logging
 # was configured, because what if user decides to use logging within the
