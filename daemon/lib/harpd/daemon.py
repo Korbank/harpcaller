@@ -731,7 +731,7 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         signal.signal(signal.SIGALRM, self.handle_tick)
         signal.alarm(1)
 
-        logger.info(log("listening on SSL socket", host = host, port = port))
+        logger.info(log("listening on SSL socket", address = host, port = port))
         self.timeout = None
         self.read_timeout = 10
         self.socket = ssl.SSLSocket(
