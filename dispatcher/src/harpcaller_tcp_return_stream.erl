@@ -313,6 +313,11 @@ format_result({error, {Type, Message, Data}} = _Result)
 when is_binary(Type), is_binary(Message) ->
   [{<<"error">>,
     [{<<"type">>, Type}, {<<"message">>, Message}, {<<"data">>, Data}]}];
+format_result({error, unknown_host} = _Result) ->
+  [{<<"error">>, [
+    {<<"type">>, <<"unknown_host">>},
+    {<<"message">>, <<"host unknown">>}
+  ]}];
 format_result({error, closed} = _Result) ->
   [{<<"error">>, [
     {<<"type">>, <<"closed">>},
@@ -329,6 +334,8 @@ format_result({error, Reason} = _Result) when is_atom(Reason) ->
     {<<"message">>, list_to_binary(inet:format_error(Reason))}
   ]}];
 format_result({error, Reason} = _Result) ->
+  % XXX: this can be an error coming from `ssl' application, like certificate
+  % verification error
   [{<<"error">>, [
     {<<"type">>, <<"unrecognized">>},
     % hopefully 1024 chars will be enough; if not, pity, it's still serialized
