@@ -68,7 +68,7 @@ convenient for other uses.
 Contact and License
 -------------------
 
-HarpCaller is written by Stanislaw klekot <dozzie at jarowit.net> for
+HarpCaller is written by Stanislaw Klekot <dozzie at jarowit.net> for
 Korbank S.A <http://korbank.com/>.
 The primary distribution point is <https://github.com/korbank/harpcaller>.
 
