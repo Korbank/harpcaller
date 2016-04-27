@@ -7,7 +7,7 @@
 -module(harp).
 
 -export([call/3]).
--export([request/3, recv/1, recv/2, cancel/1]).
+-export([request/3, recv/1, recv/2, cancel/1, controlling_process/2]).
 
 -export_type([procedure/0, argument/0]).
 -export_type([stream_record/0, result/0, error_description/0]).
@@ -271,6 +271,14 @@ recv(Handle, Timeout) ->
 
 cancel(Handle) ->
   ssl_close(Handle).
+
+%% @doc Assign a new controlling process to call request.
+
+-spec controlling_process(handle(), pid()) ->
+  ok | {error, term()}.
+
+controlling_process(Handle, Pid) ->
+  ssl:controlling_process(Handle, Pid).
 
 %%%---------------------------------------------------------------------------
 %%% SSL helpers
