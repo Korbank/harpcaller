@@ -52,13 +52,13 @@ refresh() ->
 %%%---------------------------------------------------------------------------
 
 %% @private
-%% @doc Start example process.
+%% @doc Start refresher process.
 
 start() ->
   gen_server:start({local, ?MODULE}, ?MODULE, [], []).
 
 %% @private
-%% @doc Start example process.
+%% @doc Start refresher process.
 
 start_link() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

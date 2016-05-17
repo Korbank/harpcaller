@@ -60,13 +60,13 @@ known(Certificate = #'OTPCertificate'{}) ->
 %%%---------------------------------------------------------------------------
 
 %% @private
-%% @doc Start example process.
+%% @doc Start certificate store process.
 
 start() ->
   gen_server:start({local, ?MODULE}, ?MODULE, [], []).
 
 %% @private
-%% @doc Start example process.
+%% @doc Start certificate store process.
 
 start_link() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

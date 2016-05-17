@@ -154,7 +154,7 @@ struct_or_string(Entry) ->
 %%%---------------------------------------------------------------------------
 
 %% @private
-%% @doc Start example process.
+%% @doc Start log collector process.
 
 start() ->
   case gen_event:start({local, ?MODULE}) of
@@ -171,7 +171,7 @@ start() ->
   end.
 
 %% @private
-%% @doc Start example process.
+%% @doc Start log collector process.
 
 start_link() ->
   case gen_event:start_link({local, ?MODULE}) of

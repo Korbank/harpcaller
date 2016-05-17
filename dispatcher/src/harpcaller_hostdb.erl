@@ -75,13 +75,13 @@ list() ->
 %%%---------------------------------------------------------------------------
 
 %% @private
-%% @doc Start example process.
+%% @doc Start host database process.
 
 start() ->
   gen_server:start({local, ?MODULE}, ?MODULE, [], []).
 
 %% @private
-%% @doc Start example process.
+%% @doc Start host database process.
 
 start_link() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
