@@ -137,7 +137,7 @@ to_string(Data) ->
 %% @doc Convert single value from {@type event_info()} to something
 %%   JSON-serializable.
 
--spec struct_or_string(harp_json:struct() | {term, term()} | {str, string}) ->
+-spec struct_or_string(harp_json:struct() | {term, term()} | {str, string()}) ->
   harp_json:struct().
 
 struct_or_string({term, Term} = _Entry) ->
