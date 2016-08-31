@@ -10,23 +10,9 @@
 
 %% gen_indira_command callbacks
 -export([handle_command/2]).
-%% daemon control
--export([command_status/1, command_stop/0, command_reload_config/0]).
--export([reply_status/1, reply_stop/1, reply_reload_config/1]).
-%% RPC job control
--export([command_list_jobs/0, command_cancel_job/1]).
--export([reply_list_jobs/1, reply_cancel_job/1]).
-%% hosts registry control
--export([command_list_hosts/0, command_refresh_hosts/0]).
--export([reply_list_hosts/1, reply_refresh_hosts/1]).
-%% queues control
--export([command_list_queues/0, command_list_queue/1, command_cancel_queue/1]).
--export([reply_list_queues/1, reply_list_queue/1, reply_cancel_queue/1]).
-%% Erlang networking control
--export([command_dist_start/0, command_dist_stop/0]).
--export([reply_dist_start/1, reply_dist_stop/1]).
 
--define(LOG_CAT, control).
+%% `harpcaller_cli_handler' interface
+-export([format_request/1, parse_reply/2, hardcoded_reply/1]).
 
 %%%---------------------------------------------------------------------------
 %%% gen_indira_command callbacks
@@ -36,7 +22,7 @@
 %% daemon control
 
 handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
-  harpcaller_log:info(?LOG_CAT, "stopping harpcaller daemon", []),
+  harpcaller_log:info(control, "stopping harpcaller daemon", []),
   init:stop(),
   [{result, ok}, {pid, list_to_binary(os:getpid())}];
 
@@ -49,7 +35,7 @@ handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, false}] = _Command,
                _Args) ->
   case is_started() of
     true  -> [{result, <<"running">>}];
-    false -> [{result, <<"not running">>}]
+    false -> [{result, <<"stopped">>}]
   end;
 
 handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
@@ -73,7 +59,7 @@ handle_command([{<<"command">>, <<"cancel_job">>},
 %% hosts registry control
 
 handle_command([{<<"command">>, <<"list_hosts">>}] = _Command, _Args) ->
-  Hosts = list_hosts(),
+  Hosts = [format_host_entry(H) || H <- harpcaller_hostdb:list()],
   [{result, ok}, {hosts, Hosts}];
 
 handle_command([{<<"command">>, <<"refresh_hosts">>}] = _Command, _Args) ->
@@ -102,18 +88,100 @@ handle_command([{<<"command">>, <<"cancel_queue">>},
 
 handle_command([{<<"command">>, <<"dist_start">>}] = _Command, _Args) ->
   % TODO: handle errors
-  ok = indira:distributed_start(),
+  ok = indira_app:distributed_start(),
   [{result, ok}];
 
 handle_command([{<<"command">>, <<"dist_stop">>}] = _Command, _Args) ->
   % TODO: handle errors
-  ok = indira:distributed_stop(),
+  ok = indira_app:distributed_stop(),
   [{result, ok}];
 
 handle_command(_Command, _Args) ->
   [{error, <<"unsupported command">>}].
 
-%%----------------------------------------------------------
+%%%---------------------------------------------------------------------------
+%%% interface for `harpcaller_cli_handler'
+%%%---------------------------------------------------------------------------
+
+format_request(status) ->
+  [{command, status}, {wait, false}];
+format_request(status_wait) ->
+  [{command, status}, {wait, true}];
+format_request(stop) ->
+  [{command, stop}];
+format_request(reload_config) ->
+  [{command, reload_config}];
+
+format_request(list_jobs) ->
+  [{command, list_jobs}];
+format_request({cancel_job, JobID}) when is_list(JobID) ->
+  format_request({cancel_job, list_to_binary(JobID)});
+format_request({cancel_job, JobID}) when is_binary(JobID) ->
+  [{command, cancel_job}, {job, JobID}];
+
+format_request(list_hosts) ->
+  [{command, list_hosts}];
+format_request(refresh_hosts) ->
+  [{command, refresh_hosts}];
+
+format_request(list_queues) ->
+  [{command, list_queues}];
+format_request({list_queue, Queue}) ->
+  [{command, list_queue}, {queue, Queue}];
+format_request({cancel_queue, Queue}) ->
+  [{command, cancel_queue}, {queue, Queue}];
+
+format_request(dist_start) ->
+  [{command, dist_start}];
+format_request(dist_stop) ->
+  [{command, dist_stop}].
+
+parse_reply([{<<"result">>, <<"ok">>}] = _Reply, _Request) ->
+  ok;
+parse_reply([{<<"reason">>, Reason}, {<<"result">>, <<"error">>}] = _Reply,
+            _Request) when is_binary(Reason) ->
+  {error, Reason};
+
+parse_reply([{<<"result">>, Status}] = _Reply, status = _Request) ->
+  {ok, Status};
+parse_reply([{<<"result">>, Status}] = _Reply, status_wait = _Request) ->
+  {ok, Status};
+
+parse_reply([{<<"pid">>, Pid}, {<<"result">>, <<"ok">>}] = _Reply,
+            stop = _Request) when is_binary(Pid) ->
+  {ok, binary_to_list(Pid)};
+
+parse_reply([{<<"jobs">>, Jobs}, {<<"result">>, <<"ok">>}] = _Reply,
+            list_jobs = _Request) when is_list(Jobs) ->
+  {ok, Jobs};
+
+parse_reply([{<<"result">>, <<"no_such_job">>}] = _Reply,
+            {cancel_job, _} = _Request) ->
+  {error, <<"no such job">>};
+
+parse_reply([{<<"hosts">>, Hosts}, {<<"result">>, <<"ok">>}] = _Reply,
+            list_hosts = _Request) when is_list(Hosts) ->
+  {ok, Hosts};
+
+parse_reply([{<<"queues">>, Queues}, {<<"result">>, <<"ok">>}] = _Reply,
+            list_queues = _Request) when is_list(Queues) ->
+  {ok, Queues};
+
+parse_reply([{<<"jobs">>, Jobs}, {<<"result">>, <<"ok">>}] = _Reply,
+            {list_queue, _} = _Request) when is_list(Jobs) ->
+  {ok, Jobs};
+
+parse_reply(_Reply, _Request) ->
+  {error, <<"unrecognized reply from daemon">>}.
+
+hardcoded_reply(ok = _Reply) ->
+  [{<<"result">>, <<"ok">>}];
+hardcoded_reply(status_stopped = _Reply) ->
+  [{<<"result">>, <<"stopped">>}].
+
+%%%---------------------------------------------------------------------------
+%%% helper functions
+%%%---------------------------------------------------------------------------
 
 wait_for_start() ->
   case is_started() of
@@ -156,9 +224,6 @@ job_info(Pid) ->
     ]}
   ].
 
-list_hosts() ->
-  [format_host_entry(H) || H <- harpcaller_hostdb:list()].
-
 format_host_entry({Hostname, Address, Port}) ->
   _Entry = [
     {<<"hostname">>, Hostname}, % binary
@@ -174,134 +239,6 @@ list_queue(QueueName) ->
     [{running, false} | job_info(P)] || P <- Queued
   ].
 
-%%----------------------------------------------------------
-
-%%%---------------------------------------------------------------------------
-
-%%----------------------------------------------------------
-%% daemon control {{{
-
-command_status(Wait) when Wait == true; Wait == false ->
-  [{command, status}, {wait, Wait}].
-
-reply_status([{<<"result">>, Status}] = _Reply) -> {ok, Status};
-reply_status(Reply) -> {error, invalid_reply(Reply)}.
-
-command_stop() ->
-  [{command, stop}].
-
-reply_stop([{<<"pid">>, Pid}, {<<"result">>, <<"ok">>}] = _Reply)
-when is_binary(Pid) ->
-  {ok, binary_to_list(Pid)};
-reply_stop(Reply) ->
-  {error, invalid_reply(Reply)}.
-
-command_reload_config() ->
-  [{command, reload_config}].
-
-reply_reload_config([{<<"result">>, <<"ok">>}] = _Reply) -> ok;
-reply_reload_config(Reply) -> {error, invalid_reply(Reply)}.
-
-%% }}}
-%%----------------------------------------------------------
-%% RPC job control {{{
-
-command_list_jobs() ->
-  [{command, list_jobs}].
-
-reply_list_jobs([{<<"jobs">>, Jobs}, {<<"result">>, <<"ok">>}] = _Reply) ->
-  {ok, Jobs};
-reply_list_jobs(Reply) ->
-  {error, invalid_reply(Reply)}.
-
-command_cancel_job(JobID) when is_list(JobID) ->
-  command_cancel_job(list_to_binary(JobID));
-command_cancel_job(JobID) when is_binary(JobID) ->
-  [{command, cancel_job}, {job, JobID}].
-
-reply_cancel_job([{<<"result">>, <<"ok">>}] = _Reply) -> ok;
-reply_cancel_job([{<<"result">>, <<"no_such_job">>}] = _Reply) -> {error, "no such job"};
-reply_cancel_job(Reply) -> {error, invalid_reply(Reply)}.
-
-%% }}}
-%%----------------------------------------------------------
-%% hosts registry control {{{
-
-command_list_hosts() ->
-  [{command, list_hosts}].
-
-reply_list_hosts([{<<"hosts">>, Hosts}, {<<"result">>, <<"ok">>}] = _Reply) ->
-  {ok, Hosts};
-reply_list_hosts(Reply) ->
-  {error, invalid_reply(Reply)}.
-
-command_refresh_hosts() ->
-  [{command, refresh_hosts}].
-
-reply_refresh_hosts([{<<"result">>, <<"ok">>}] = _Reply) -> ok;
-reply_refresh_hosts(Reply) -> {error, invalid_reply(Reply)}.
-
-%% }}}
-%%----------------------------------------------------------
-%% queues control {{{
-
-command_list_queues() ->
-  [{command, list_queues}].
-
-reply_list_queues([{<<"queues">>, Queues}, {<<"result">>, <<"ok">>}] = _Reply) ->
-  {ok, Queues};
-reply_list_queues(Reply) ->
-  {error, invalid_reply(Reply)}.
-
-command_list_queue(Queue) -> % XXX: `Queue' needs to be jsx structure
-  [{command, list_queue}, {queue, Queue}].
-
-reply_list_queue([{<<"jobs">>, Jobs}, {<<"result">>, <<"ok">>}] = _Reply) ->
-  {ok, Jobs};
-reply_list_queue(Reply) ->
-  {error, invalid_reply(Reply)}.
-
-command_cancel_queue(Queue) -> % XXX: `Queue' needs to be jsx structure
-  [{command, cancel_queue}, {queue, Queue}].
-
-reply_cancel_queue([{<<"result">>, <<"ok">>}] = _Reply) -> ok;
-reply_cancel_queue(Reply) -> {error, invalid_reply(Reply)}.
-
-%% }}}
-%%----------------------------------------------------------
-%% Erlang networking control {{{
-
-command_dist_start() ->
-  [{command, dist_start}].
-
-reply_dist_start([{<<"result">>, <<"ok">>}] = _Reply) ->
-  ok;
-reply_dist_start([{<<"reason">>, Reason},
-                  {<<"result">>, <<"error">>}] = _Reply)
-when is_binary(Reason) ->
-  {error, Reason};
-reply_dist_start(Reply) ->
-  {error, invalid_reply(Reply)}.
-
-command_dist_stop() ->
-  [{command, dist_stop}].
-
-reply_dist_stop([{<<"result">>, <<"ok">>}] = _Reply) ->
-  ok;
-reply_dist_stop([{<<"reason">>, Reason},
-                  {<<"result">>, <<"error">>}] = _Reply)
-when is_binary(Reason) ->
-  {error, Reason};
-reply_dist_stop(Reply) ->
-  {error, invalid_reply(Reply)}.
-
-%% }}}
-%%----------------------------------------------------------
-
-invalid_reply(Reply) ->
-  {ok, ReplyJSON} = indira_json:encode(Reply),
-  ["invalid reply line: ", ReplyJSON].
-
 undef_null(undefined = _Value) -> null;
 undef_null(Value) -> Value.
 
@@ -310,8 +247,6 @@ format_address({A,B,C,D} = _Address) ->
   iolist_to_binary(io_lib:format("~B.~B.~B.~B", [A,B,C,D]));
 format_address(Address) when is_list(Address) ->
   list_to_binary(Address).
-
-%%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
