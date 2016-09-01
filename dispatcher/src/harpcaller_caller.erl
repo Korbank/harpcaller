@@ -112,21 +112,19 @@ locate(JobID) when is_list(JobID) ->
 job_id(Pid) when is_pid(Pid) ->
   gen_server:call(Pid, job_id).
 
-%% @doc Send a request to caller process responsible for a job.
+%% @doc Send an asynchronous request to caller process responsible for a job.
+%%   Return `undefined' if there was no job of the specified ID.
 
--spec request(harpcaller:job_id(), term()) ->
-  term() | undefined.
+-spec async_request(harpcaller:job_id(), term()) ->
+  {ok, pid()} | undefined.
 
-request(JobID, Request) when is_list(JobID) ->
+async_request(JobID, Request) when is_list(JobID) ->
   case ets:lookup(?ETS_REGISTRY_TABLE, JobID) of
     [{JobID, Pid}] ->
-      try
-        gen_server:call(Pid, Request)
-      catch
-        exit:{noproc,_} -> undefined; % process has terminated earlier
-        exit:{normal,_} -> undefined  % process was terminating during the call
-      end;
-    [] -> undefined
+      gen_server:cast(Pid, Request),
+      {ok, Pid};
+    [] ->
+      undefined
   end.
 
 %% @doc Cancel remote call job.
@@ -135,7 +133,10 @@ request(JobID, Request) when is_list(JobID) ->
   ok | undefined.
 
 cancel(JobID) ->
-  request(JobID, cancel).
+  case async_request(JobID, cancel) of
+    {ok, _Pid} -> ok;
+    undefined -> undefined
+  end.
 
 %% @doc Retrieve result of a job (non-blocking).
 
@@ -149,20 +150,15 @@ cancel(JobID) ->
   | undefined.
 
 get_result(JobID) ->
-  case request(JobID, get_sdb) of
-    {ok, StreamTable} ->
-      harp_sdb:result(StreamTable);
-    undefined ->
-      case harp_sdb:load(JobID) of
-        {ok, DBH} ->
-          Result = harp_sdb:result(DBH),
-          harp_sdb:close(DBH),
-          Result;
-        {error, enoent} ->
-          undefined;
-        {error, Reason} ->
-          {error, Reason}
-      end
+  case harp_sdb:load(JobID) of
+    {ok, DBH} ->
+      Result = harp_sdb:result(DBH),
+      harp_sdb:close(DBH),
+      Result;
+    {error, enoent} ->
+      undefined;
+    {error, Reason} ->
+      {error, Reason}
   end.
 
 %% @doc Follow stream of records returned by the job.
@@ -181,7 +177,7 @@ get_result(JobID) ->
   {ok, Monitor :: reference()} | undefined.
 
 follow_stream(JobID) ->
-  case request(JobID, {follow, self()}) of
+  case async_request(JobID, {follow, self()}) of
     {ok, Pid} ->
       MonRef = erlang:monitor(process, Pid),
       {ok, MonRef};
@@ -199,20 +195,15 @@ follow_stream(JobID) ->
   | undefined.
 
 get_call_info(JobID) ->
-  case request(JobID, get_sdb) of
-    {ok, StreamTable} ->
-      harp_sdb:info(StreamTable);
-    undefined ->
-      case harp_sdb:load(JobID) of
-        {ok, DBH} ->
-          {ok, Info} = harp_sdb:info(DBH),
-          harp_sdb:close(DBH),
-          {ok, Info};
-        {error, enoent} ->
-          undefined;
-        {error, Reason} ->
-          {error, Reason}
-      end
+  case harp_sdb:load(JobID) of
+    {ok, DBH} ->
+      {ok, Info} = harp_sdb:info(DBH),
+      harp_sdb:close(DBH),
+      {ok, Info};
+    {error, enoent} ->
+      undefined;
+    {error, Reason} ->
+      {error, Reason}
   end.
 
 %%%---------------------------------------------------------------------------
@@ -333,25 +324,8 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
       {stop, StopReason, {error, StopReason}, State}
   end;
 
-handle_call({follow, Pid} = _Request, _From,
-            State = #state{followers = Followers}) ->
-  Ref = erlang:monitor(process, Pid),
-  ets:insert(Followers, {Pid, Ref}),
-  {reply, {ok, self()}, State, 0};
-
 handle_call(job_id = _Request, _From, State = #state{job_id = JobID}) ->
   {reply, JobID, State, 0};
-
-handle_call(get_sdb = _Request, _From,
-            State = #state{stream_table = StreamTable}) ->
-  {reply, {ok, StreamTable}, State, 0};
-
-handle_call(cancel = _Request, _From,
-            State = #state{stream_table = StreamTable, job_id = JobID}) ->
-  harpcaller_log:info(?LOG_CAT, "got a cancel order", [{job, {str, JobID}}]),
-  notify_followers(State, {terminated, JobID, cancelled}),
-  harp_sdb:set_result(StreamTable, cancelled),
-  {stop, normal, ok, State};
 
 %% unknown calls
 handle_call(_Request, _From, State) ->
@@ -359,6 +333,18 @@ handle_call(_Request, _From, State) ->
 
 %% @private
 %% @doc Handle {@link gen_server:cast/2}.
+
+handle_cast({follow, Pid} = _Request, State = #state{followers = Followers}) ->
+  Ref = erlang:monitor(process, Pid),
+  ets:insert(Followers, {Pid, Ref}),
+  {noreply, State, 0};
+
+handle_cast(cancel = _Request,
+            State = #state{stream_table = StreamTable, job_id = JobID}) ->
+  harpcaller_log:info(?LOG_CAT, "got a cancel order", [{job, {str, JobID}}]),
+  notify_followers(State, {terminated, JobID, cancelled}),
+  harp_sdb:set_result(StreamTable, cancelled),
+  {stop, normal, State};
 
 %% unknown casts
 handle_cast(_Request, State) ->
