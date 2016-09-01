@@ -115,13 +115,41 @@ new(TableName, Procedure, ProcArgs, RemoteAddress) ->
   {ok, handle()} | {error, term()}.
 
 load(TableName) ->
+  case try_load(TableName) of
+    {ok, Pid} ->
+      {ok, Pid};
+    again ->
+      case try_load(TableName) of
+        {ok, Pid} -> {ok, Pid};
+        again -> {error, file_load_race_condition};
+        {error, Reason} -> {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Try loading an existing table (workhorse for {@link load/1}).
+
+-spec try_load(table_name()) ->
+  {ok, handle()} | again | {error, term()}.
+
+try_load(TableName) ->
   % FIXME: this is a race condition between lookup and call/spawn
   case ets:lookup(?ETS_REGISTRY_TABLE, TableName) of
     [{TableName, Pid}] ->
-      ok = gen_server:call(Pid, {load, self()}),
-      {ok, Pid};
+      try
+        ok = gen_server:call(Pid, {load, self()}),
+        {ok, Pid}
+      catch
+        exit:{noproc,_} -> again;
+        exit:{normal,_} -> again
+      end;
     [] ->
-      harp_sdb_sup:spawn_child([TableName, self(), read])
+      case harp_sdb_sup:spawn_child([TableName, self(), read]) of
+        {ok, Pid} when is_pid(Pid) -> {ok, Pid};
+        {ok, undefined} -> again;
+        {error, Reason} -> {error, Reason}
+      end
   end.
 
 %% @doc Close table handle.
