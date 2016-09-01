@@ -270,13 +270,14 @@ terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
 %% @private
 %% @doc Handle {@link gen_server:call/2}.
 
-handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
+handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
             State = #state{job_id = JobID, call = undefined}) ->
   {Timeout, MaxExecTime, Queue} = decode_options(Options),
   harpcaller_log:info(?LOG_CAT, "starting a new call",
                       [{job, {str, JobID}}]),
   case harp_sdb:new(JobID, Procedure, ProcArgs, Host) of
     {ok, StreamTable} ->
+      gen_server:reply(From, {ok, JobID}),
       FilledState = State#state{
         stream_table = StreamTable,
         request = {Procedure, ProcArgs, Host},
@@ -296,7 +297,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
                 start_time = Now,
                 last_read = Now
               },
-              {reply, {ok, JobID}, NewState, 0};
+              {noreply, NewState, 0};
             {error, Reason} ->
               harpcaller_log:warn(?LOG_CAT, "call failed",
                                   [{job, {str, JobID}},
@@ -304,7 +305,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
               harp_sdb:set_result(StreamTable, {error, Reason}),
               % request itself failed, but the job was carried successfully;
               % tell the parent that that part got done
-              {stop, {call, Reason}, {ok, JobID}, FilledState}
+              {stop, {call, Reason}, FilledState}
           end;
         {QueueName, Concurrency} ->
           % enqueue and wait for a message
@@ -314,7 +315,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, _From,
           NewState = FilledState#state{
             call = {queued, QRef}
           },
-          {reply, {ok, JobID}, NewState}
+          {noreply, NewState}
       end;
     {error, Reason} ->
       harpcaller_log:err(?LOG_CAT, "opening stream storage failed",
