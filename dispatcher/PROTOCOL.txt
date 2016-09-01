@@ -86,6 +86,29 @@ Reply:
       Harp daemon responded to dispatcher's request with garbage
 
 
+Reading full status of a job
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  {"harpcaller": 1, "get_status": "..."}
+
+Value of "get_status" is job ID.
+
+Reply has two types of information, what was called and when it was called:
+  { "call": {"host": "...", "procedure": "...", "arguments": ...},
+    "time": {"submit": integer, "start": integer, "end": integer} }
+
+Value of "submit" is always set to a timestamp, but "start" and "end" may be
+null if the job wasn't started or hasn't ended yet (job cancelled before it
+could start will have "start" null with "end" set).
+
+If a non-exsiting job ID was requested, an error is returned:
+  {"error": {"type": "invalid_jobid", "message": "..."}}
+
+For any other error, a message similar to errors in receiving call results is
+sent:
+  {"error": {"type": "...", "message": "..."}}
+
+
 Reading result stream
 ~~~~~~~~~~~~~~~~~~~~~
 
