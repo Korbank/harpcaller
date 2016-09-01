@@ -100,17 +100,15 @@ locate(JobID) when is_list(JobID) ->
   end.
 
 %% @doc Determine job ID of a process.
-%%
-%%   This function is for inspection purposes. The process should be {@link
-%%   harpcaller_caller}, otherwise the call may fail in any unexpected way.
-%%   You should probably also catch `gen_server:call/2' dying, in case `Pid'
-%%   has just terminated.
 
 -spec job_id(pid()) ->
-  harpcaller:job_id().
+  {ok, harpcaller:job_id()} | undefined.
 
 job_id(Pid) when is_pid(Pid) ->
-  gen_server:call(Pid, job_id).
+  case ets:lookup(?ETS_REGISTRY_TABLE, Pid) of
+    [{Pid, JobID}] -> {ok, JobID};
+    [] -> undefined
+  end.
 
 %% @doc Send an asynchronous request to caller process responsible for a job.
 %%   Return `undefined' if there was no job of the specified ID.
@@ -242,7 +240,10 @@ start_link(Procedure, ProcArgs, Host, Options) ->
 
 init([] = _Args) ->
   JobID = harpcaller:generate_job_id(),
-  ets:insert(?ETS_REGISTRY_TABLE, {JobID, self()}),
+  ets:insert(?ETS_REGISTRY_TABLE, [
+    {JobID, self()},
+    {self(), JobID}
+  ]),
   Followers = ets:new(followers, [set]),
   State = #state{
     job_id = JobID,
@@ -256,6 +257,7 @@ init([] = _Args) ->
 terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
                                 stream_table = StreamTable}) ->
   ets:delete(?ETS_REGISTRY_TABLE, JobID),
+  ets:delete(?ETS_REGISTRY_TABLE, self()),
   ets:delete(Followers),
   case StreamTable of
     undefined -> ok;

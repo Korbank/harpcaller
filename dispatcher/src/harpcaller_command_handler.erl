@@ -205,8 +205,8 @@ list_jobs_info() ->
 
 job_info(Pid) ->
   % TODO: catch errors from `harpcaller_caller:job_id()' when task terminated
-  %   between listing processes and checking out their info
-  JobID = harpcaller_caller:job_id(Pid),
+  %   between listing processes and checking out its info
+  {ok, JobID} = harpcaller_caller:job_id(Pid),
   {ok, {ProcInfo, Host, TimeInfo}} = harpcaller_caller:get_call_info(JobID),
   {ProcName, ProcArgs} = ProcInfo,
   {SubmitTime, StartTime, EndTime} = TimeInfo,
