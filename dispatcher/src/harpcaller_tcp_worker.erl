@@ -44,6 +44,9 @@
 -type request_get_result() ::
   {get_result, harpcaller:job_id(), wait | no_wait}.
 
+-type request_get_status() ::
+  {get_status, harpcaller:job_id()}.
+
 -type request_follow_stream() ::
     {follow_stream, harpcaller:job_id(), since, non_neg_integer()}
   | {follow_stream, harpcaller:job_id(), recent, non_neg_integer()}.
@@ -169,6 +172,31 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       NewState = harpcaller_tcp_return_result:state(Socket, JobID, Wait),
       % this does not return to this code
       gen_server:enter_loop(harpcaller_tcp_return_result, [], NewState, 0);
+    {get_status, JobID} -> % immediate
+      put('$worker_function', get_status),
+      harpcaller_log:info(?LOG_CAT, "get job's status",
+                          [{client, {term, Peer}}, {job, {str, JobID}}]),
+      case job_status(JobID) of
+        {ok, JobStatus} ->
+          send_response(Socket, JobStatus);
+        undefined ->
+          send_response(Socket, [
+            {<<"error">>, [
+              {<<"type">>, <<"invalid_jobid">>},
+              {<<"message">>, <<"no job with this ID">>}
+            ]}
+          ]);
+        {error, Reason} -> % `Reason' is a binary
+          harpcaller_log:warn(?LOG_CAT, "job status reading error",
+                              [{job, {str, JobID}}, {reason, Reason}]),
+          send_response(Socket, [
+            {<<"error">>, [
+              {<<"type">>, <<"unrecognized">>},
+              {<<"message">>, Reason}
+            ]}
+          ])
+      end,
+      {stop, normal, State};
     {follow_stream, JobID, Mode, ModeArg} -> % long running
       % `Mode :: recent | since'
       put('$worker_function', follow_stream),
@@ -219,6 +247,7 @@ code_change(_OldVsn, State, _Extra) ->
     request_call()
   | request_cancel()
   | request_get_result()
+  | request_get_status()
   | request_follow_stream()
   | request_read_stream()
   | timeout
@@ -249,6 +278,7 @@ read_request(Socket, Timeout) ->
     request_call()
   | request_cancel()
   | request_get_result()
+  | request_get_status()
   | request_follow_stream()
   | request_read_stream()
   | no_return().
@@ -304,6 +334,9 @@ decode_request(Line) ->
       {get_result, convert_job_id(JobID), no_wait};
     [{<<"get_result">>, JobID}, {<<"wait">>, true}] ->
       {get_result, convert_job_id(JobID), wait};
+
+    [{<<"get_status">>, JobID}] ->
+      {get_status, convert_job_id(JobID)};
 
     [{<<"follow_stream">>, JobID}] ->
       % XXX: `recent 0', as specified in the protocol; different from
@@ -378,6 +411,37 @@ queue_log_info({QueueName, QueueConcurrency} = _QueueSpec) ->
   [{name, QueueName}, {concurrency, QueueConcurrency}];
 queue_log_info(undefined = _QueueSpec) ->
   null.
+
+%% @doc Read job status and format it as JSON-serializable object.
+
+-spec job_status(harpcaller:job_id()) ->
+  {ok, harp_json:struct()} | undefined | {error, binary()}.
+
+job_status(JobID) ->
+  case harpcaller_caller:get_call_info(JobID) of
+    {ok, {{ProcName, ProcArgs} = _ProcInfo, Host,
+          {SubmitTime, StartTime, EndTime} = _TimeInfo}} ->
+      JobStatus = [
+        {<<"call">>, [
+          {<<"procedure">>, ProcName},
+          {<<"arguments">>, ProcArgs},
+          {<<"host">>, Host}
+        ]},
+        {<<"time">>, [
+          {<<"submit">>, undef_null(SubmitTime)}, % non-null, but consistency
+          {<<"start">>,  undef_null(StartTime)},
+          {<<"end">>,    undef_null(EndTime)}
+        ]}
+      ],
+      {ok, JobStatus};
+    undefined ->
+      undefined;
+    {error, Reason} ->
+      {error, iolist_to_binary(io_lib:format("~1024p", [Reason]))}
+  end.
+
+undef_null(undefined = _Value) -> null;
+undef_null(Value) -> Value.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
