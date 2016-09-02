@@ -91,6 +91,7 @@ Exceptions
 import socket
 import ssl
 import json
+import collections
 
 #-----------------------------------------------------------------------------
 
@@ -666,6 +667,7 @@ class RemoteCall(object):
         self.job_id = job_id
         self._result = None
         self._has_result = False
+        self._metadata = None
 
     def id(self):
         '''
@@ -857,6 +859,96 @@ class RemoteCall(object):
             "cancel": self.job_id,
         })
         return response["cancelled"] # True | False
+
+    def _get_metadata(self):
+        metadata = collections.namedtuple("JobStatus", [
+            "procedure", "args", "host",
+            "submitted", "start", "end",
+        ])
+        response = self.dispatcher.request({
+            "harpcaller": 1,
+            "get_status": self.job_id,
+        })
+        if "call" in response and "time" in response:
+            metadata.procedure = response["call"]["procedure"]
+            metadata.args      = response["call"]["arguments"]
+            metadata.host      = response["call"]["host"]
+            metadata.submitted = response["time"]["submit"]
+            metadata.start     = response["time"]["start"]
+            metadata.end       = response["time"]["end"]
+            self._metadata = metadata
+        elif "error" in message:
+            # {"type": "...", "message": "...", "data": ...}
+            error = message["error"]
+            self._result = RemoteError(
+                error["type"],
+                error["message"],
+                error.get("data"),
+            )
+        #else: invalid message; return an exception
+
+    def procedure(self):
+        '''
+        :return: unicode
+
+        Return name of the procedure called in this job.
+        '''
+        if self._metadata is None:
+            self._get_metadata()
+        return self._metadata.procedure
+
+    def args(self):
+        '''
+        :return: list of JSON-serializable values
+
+        Return arguments passed to this job.
+        '''
+        if self._metadata is None:
+            self._get_metadata()
+        return self._metadata.args
+
+    def host(self):
+        '''
+        :return: unicode
+
+        Return target host of this job.
+        '''
+        if self._metadata is None:
+            self._get_metadata()
+        return self._metadata.host
+
+    def submit_time(self):
+        '''
+        :return: unix timestamp (integer)
+
+        Return time when the job was submitted for execution.
+        '''
+        if self._metadata is None:
+            self._get_metadata()
+        return self._metadata.submitted
+
+    def start_time(self):
+        '''
+        :return: unix timestamp (integer) or ``None``
+
+        Return time when the job started its execution. ``None`` is returned
+        if the job was not started (yet?) due to queueing.
+        '''
+        if self._metadata is None:
+            self._get_metadata()
+        return self._metadata.start
+
+    def end_time(self):
+        '''
+        :return: unix timestamp (integer) or ``None``
+
+        Return time when the job finished, either because function returned,
+        an error occurred, or the job was cancelled. ``None`` is returned
+        if the job hasn't finished yet.
+        '''
+        if self._metadata is None:
+            self._get_metadata()
+        return self._metadata.end
 
     def __repr__(self):
         return '<%s.%s "%s">' % (
