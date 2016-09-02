@@ -3,7 +3,7 @@
 %%----------------------------------------------------------------------------
 
 -define(DEFAULT_CONFIG_FILE, "/etc/harpcaller/harpcaller.toml").
--define(DEFAULT_SOCKET_PATH, "/var/run/harpcaller/harpcaller.sock").
+-define(DEFAULT_SOCKET_PATH, "/var/run/harpcaller/control").
 
 help() ->
   help(standard_io).
