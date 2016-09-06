@@ -45,7 +45,7 @@ harp-clean daemon-clean dispatcher-clean:
 	$(MAKE) clean -C $(patsubst %-clean,%,$@)
 
 harp/version daemon/version dispatcher/version:
-	git describe --long --dirty --match='v*' --abbrev=10 --tags > $@
+	(git describe --long --dirty --match='v*' --abbrev=10 --tags 2> /dev/null || echo devel) > $@
 
 .PHONY: version
 version: harp/version daemon/version dispatcher/version

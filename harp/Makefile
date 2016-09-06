@@ -15,4 +15,4 @@ clean:
 # building from source package instead of from git repository)
 .PHONY: version
 version:
-	git describe --long --dirty --abbrev=10 --tags --match 'v*' > $@
+	(git describe --long --dirty --match='v*' --abbrev=10 --tags 2> /dev/null || echo devel) > $@
