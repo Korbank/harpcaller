@@ -56,6 +56,7 @@
 -export([new/4, load/1, close/1]).
 -export([started/1, insert/2, set_result/2]).
 -export([result/1, stream/2, stream_size/1, info/1]).
+-export([remove_older/1]).
 
 -export_type([handle/0, info_call/0, info_time/0]).
 
@@ -75,6 +76,8 @@
 
 -type table_name() :: string().
 %% UUID string representation.
+
+-define(TABLE_NAME_RE, "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$").
 
 -type address() :: term().
 
@@ -253,6 +256,82 @@ stream_size(Handle) ->
 
 info(Handle) ->
   gen_server:call(Handle, get_info).
+
+%% }}}
+%%----------------------------------------------------------
+%% pruning old tables {{{
+
+%% @doc Remove SDB files older than specified time.
+%%
+%%   Age of an SDB file is determined from its submission time.
+%%
+%%   Function doesn't remove SDBs that are still opened. Invalid SDBs are
+%%   removed unconditionally.
+
+-spec remove_older(integer()) ->
+  ok.
+
+remove_older(Seconds) ->
+  {ok, Directory} = application:get_env(harpcaller, stream_directory),
+  OlderThan = timestamp() - Seconds,
+  FoldFun = fun(F, Acc) ->
+    remove_if_older(F, OlderThan),
+    Acc
+  end,
+  filelib:fold_files(Directory, ?TABLE_NAME_RE, false, FoldFun, []),
+  ok.
+
+%% @doc Remove stream log if it's submitted earlier than specified timestamp.
+%%
+%%   If it's an invalid stream log, it's removed as well.
+%%
+%%   File that is still opened is not removed.
+
+-spec remove_if_older(file:filename(), integer()) ->
+  any().
+
+remove_if_older(File, Timestamp) ->
+  case is_still_opened(File) of
+    false ->
+      case submitted_time(File) of
+        undefined -> file:delete(File);
+        Created when Created =< Timestamp -> file:delete(File);
+        _Created -> ok
+      end;
+    true ->
+      skip
+  end.
+
+%% @doc Check if the specified file is still opened as SDB.
+
+-spec is_still_opened(file:filename()) ->
+  boolean().
+
+is_still_opened(File) ->
+  TableName = filename:basename(File),
+  case ets:lookup(?ETS_REGISTRY_TABLE, TableName) of
+    [{TableName, _Pid}] -> true;
+    [] -> false
+  end.
+
+%% @doc Read submission time from SDB file.
+
+-spec submitted_time(file:filename()) ->
+  integer() | undefined.
+
+submitted_time(File) ->
+  case dets:open_file(make_ref(), [{file, File}, {access, read}]) of
+    {ok, FH} ->
+      Created = case dets:lookup(FH, job_submitted) of
+        [{job_submitted, Time}] when is_integer(Time) -> Time;
+        _ -> undefined % no record, multiple records, invalid record, error
+      end,
+      dets:close(FH),
+      Created;
+    {error, _} ->
+      % any read error, including not-a-DETS, enoent, eperm
+      undefined
+  end.
 
 %% }}}
 %%----------------------------------------------------------
