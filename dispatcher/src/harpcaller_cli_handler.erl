@@ -165,10 +165,15 @@ handle_reply(Reply, stop = Op, _Command = #cmd{options = Options}) ->
 handle_reply(Reply, status = Op, _Command) ->
   % `status' and `status_wait' have the same `Op' and replies
   case harpcaller_command_handler:parse_reply(Reply, Op) of
-    {ok, <<"running">> = _Status} -> ok;
-    {ok, <<"stopped">> = _Status} -> {error, 1};
+    {ok, <<"running">> = _Status} ->
+      io:fwrite("harpcallerd is running~n"),
+      ok;
+    {ok, <<"stopped">> = _Status} ->
+      io:fwrite("harpcallerd is stopped~n"),
+      {error, 1};
     % for future changes in status detection
-    {ok, Status} -> {error, {unknown_status, Status}}
+    {ok, Status} ->
+      {error, {unknown_status, Status}}
   end;
 
 handle_reply(Reply, list_jobs = Op, _Command) ->
