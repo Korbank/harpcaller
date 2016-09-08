@@ -48,6 +48,7 @@
 -include("harpcaller_caller.hrl").
 
 -define(RPC_READ_INTERVAL, 100).
+-define(CONNECT_TIMEOUT, 10000). % seconds
 
 -type call_option() ::
     {timeout, timeout()}
@@ -518,7 +519,8 @@ start_request(State = #state{request = {Procedure, ProcArgs, Hostname},
       SSLVerifyOpts = ssl_verify_options(State),
       RequestOpts = [
         {host, Address}, {port, Port},
-        {user, User}, {password, Password}
+        {user, User}, {password, Password},
+        {timeout, ?CONNECT_TIMEOUT}
       ],
       harp:request(Procedure, ProcArgs, RequestOpts ++ SSLVerifyOpts);
     none ->
