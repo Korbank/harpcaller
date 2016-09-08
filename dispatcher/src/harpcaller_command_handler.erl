@@ -55,6 +55,15 @@ handle_command([{<<"command">>, <<"cancel_job">>},
     undefined -> [{result, no_such_job}]
   end;
 
+handle_command([{<<"command">>, <<"job_info">>},
+                {<<"job">>, JobID}] = _Command, _Args) ->
+  case job_info(binary_to_list(JobID)) of
+    JobInfo when is_list(JobInfo) ->
+      [{result, ok}, {info, JobInfo}];
+    undefined ->
+      [{result, no_such_job}]
+  end;
+
 %%----------------------------------------------------------
 %% hosts registry control
 
@@ -118,6 +127,10 @@ format_request({cancel_job, JobID}) when is_list(JobID) ->
   format_request({cancel_job, list_to_binary(JobID)});
 format_request({cancel_job, JobID}) when is_binary(JobID) ->
   [{command, cancel_job}, {job, JobID}];
+format_request({job_info, JobID}) when is_list(JobID) ->
+  format_request({job_info, list_to_binary(JobID)});
+format_request({job_info, JobID}) when is_binary(JobID) ->
+  [{command, job_info}, {job, JobID}];
 
 format_request(list_hosts) ->
   [{command, list_hosts}];
@@ -150,6 +163,13 @@ parse_reply([{<<"result">>, Status}] = _Reply, status_wait = _Request) ->
 parse_reply([{<<"pid">>, Pid}, {<<"result">>, <<"ok">>}] = _Reply,
             stop = _Request) when is_binary(Pid) ->
   {ok, binary_to_list(Pid)};
+
+parse_reply([{<<"info">>, JobInfo}, {<<"result">>, <<"ok">>}] = _Reply,
+            {job_info, _} = _Request) ->
+  {ok, JobInfo};
+parse_reply([{<<"result">>, <<"no_such_job">>}] = _Reply,
+            {job_info, _} = _Request) ->
+  {error, <<"no such job">>};
 
 parse_reply([{<<"jobs">>, Jobs}, {<<"result">>, <<"ok">>}] = _Reply,
             list_jobs = _Request) when is_list(Jobs) ->
@@ -199,30 +219,37 @@ is_started() ->
 
 list_jobs_info() ->
   _Result = [
-    job_info(Pid) ||
+    pid_job_info(Pid) ||
     {_,Pid,_,_} <- supervisor:which_children(harpcaller_caller_sup)
   ].
 
-job_info(Pid) ->
+pid_job_info(Pid) ->
   % TODO: catch errors from `harpcaller_caller:job_id()' when task terminated
   %   between listing processes and checking out its info
   {ok, JobID} = harpcaller_caller:job_id(Pid),
-  {ok, {ProcInfo, Host, TimeInfo}} = harpcaller_caller:get_call_info(JobID),
-  {ProcName, ProcArgs} = ProcInfo,
-  {SubmitTime, StartTime, EndTime} = TimeInfo,
-  _JobInfo = [
-    {<<"job">>, list_to_binary(JobID)},
-    {<<"call">>, [
-      {<<"procedure">>, ProcName},
-      {<<"arguments">>, ProcArgs},
-      {<<"host">>, Host}
-    ]},
-    {<<"time">>, [
-      {<<"submit">>, undef_null(SubmitTime)}, % non-null, but consistency
-      {<<"start">>,  undef_null(StartTime)},
-      {<<"end">>,    undef_null(EndTime)}
-    ]}
-  ].
+  job_info(JobID).
+
+job_info(JobID) ->
+  case harpcaller_caller:get_call_info(JobID) of
+    {ok, {{ProcName, ProcArgs} = _ProcInfo, Host,
+          {SubmitTime, StartTime, EndTime} = _TimeInfo}} ->
+      _JobInfo = [
+        {<<"job">>, list_to_binary(JobID)},
+        {<<"call">>, [
+          {<<"procedure">>, ProcName},
+          {<<"arguments">>, ProcArgs},
+          {<<"host">>, Host}
+        ]},
+        {<<"time">>, [
+          {<<"submit">>, undef_null(SubmitTime)}, % non-null, but consistency
+          {<<"start">>,  undef_null(StartTime)},
+          {<<"end">>,    undef_null(EndTime)}
+        ]}
+      ];
+    undefined ->
+      undefined
+    % XXX: let it die on other errors
+  end.
 
 format_host_entry({Hostname, Address, Port}) ->
   _Entry = [
@@ -234,9 +261,9 @@ format_host_entry({Hostname, Address, Port}) ->
 list_queue(QueueName) ->
   {Running, Queued} = harpcaller_call_queue:list_processes(QueueName),
   _Result = [
-    [{running, true} | job_info(P)] || P <- Running
+    [{running, true} | pid_job_info(P)] || P <- Running
   ] ++ [
-    [{running, false} | job_info(P)] || P <- Queued
+    [{running, false} | pid_job_info(P)] || P <- Queued
   ].
 
 undef_null(undefined = _Value) -> null;

@@ -22,6 +22,7 @@
 -record(cmd, {
   op :: start | stop | status | reload_config
         | list_jobs | {cancel_job, string() | undefined}
+        | {job_info, string() | undefined}
         | list_hosts | refresh_hosts
         | list_queues | {list_queue, harpcaller_call_queue:queue_name()}
         | {cancel_queue, harpcaller_call_queue:queue_name() | undefined}
@@ -51,6 +52,8 @@ parse_arguments(Args, [DefAdminSocket, DefConfigFile] = _DefaultValues) ->
       {ok, status, Command};
 
     {ok, _Command = #cmd{op = {cancel_job, undefined} }} ->
+      {error, undefined_job};
+    {ok, _Command = #cmd{op = {job_info, undefined} }} ->
       {error, undefined_job};
     {ok, _Command = #cmd{op = {cancel_queue, undefined} }} ->
       {error, undefined_queue};
@@ -179,6 +182,12 @@ handle_reply(Reply, status = Op, _Command) ->
 handle_reply(Reply, list_jobs = Op, _Command) ->
   case harpcaller_command_handler:parse_reply(Reply, Op) of
     {ok, Jobs} -> lists:foreach(fun print_json/1, Jobs), ok;
+    {error, Reason} -> {error, Reason}
+  end;
+
+handle_reply(Reply, {job_info, _} = Op, _Command) ->
+  case harpcaller_command_handler:parse_reply(Reply, Op) of
+    {ok, JobInfo} -> print_json(JobInfo), ok;
     {error, Reason} -> {error, Reason}
   end;
 
@@ -401,6 +410,7 @@ help(Script) ->
     "  ", Script, " [--socket=...] reload-config\n",
     "Jobs:\n",
     "  ", Script, " [--socket=...] list\n",
+    "  ", Script, " [--socket=...] info <job-id>\n",
     "  ", Script, " [--socket=...] cancel <job-id>\n",
     "Hosts registry:\n",
     "  ", Script, " [--socket=...] hosts-list\n",
@@ -484,6 +494,11 @@ cli_opt("reload-config", Cmd = #cmd{op = undefined}) ->
 
 cli_opt("list", Cmd = #cmd{op = undefined}) ->
   _NewCmd = Cmd#cmd{op = list_jobs};
+
+cli_opt("info", Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = {job_info, undefined}};
+cli_opt(JobID, Cmd = #cmd{op = {job_info, undefined}}) ->
+  _NewCmd = Cmd#cmd{op = {job_info, JobID}};
 
 cli_opt("cancel", Cmd = #cmd{op = undefined}) ->
   _NewCmd = Cmd#cmd{op = {cancel_job, undefined}};

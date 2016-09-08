@@ -24,6 +24,7 @@ Controlling call jobs (:ref:`ref <harpcaller-jobs>`):
 .. code-block:: none
 
     harpcallerd [options] list
+    harpcallerd [options] info <job-id>
     harpcallerd [options] cancel <job-id>
     harpcallerd [options] queue-list
     harpcallerd [options] queue-list <queue-name>
@@ -170,6 +171,14 @@ Controlling call jobs
       }
 
    Job identifier (``"job"`` value) is always in UUID string format.
+
+.. program:: harpcallerd info
+
+``harpcallerd info <job-id>``
+   List information about particular job, running or terminated.
+
+   Output is a single line with JSON of the same structure as
+   ``harpcallerd list`` prints.
 
 .. program:: harpcallerd cancel
 
