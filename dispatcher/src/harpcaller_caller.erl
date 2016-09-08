@@ -111,30 +111,26 @@ job_id(Pid) when is_pid(Pid) ->
     [] -> undefined
   end.
 
-%% @doc Send an asynchronous request to caller process responsible for a job.
-%%   Return `undefined' if there was no job of the specified ID.
-
--spec async_request(harpcaller:job_id(), term()) ->
-  {ok, pid()} | undefined.
-
-async_request(JobID, Request) when is_list(JobID) ->
-  case ets:lookup(?ETS_REGISTRY_TABLE, JobID) of
-    [{JobID, Pid}] ->
-      gen_server:cast(Pid, Request),
-      {ok, Pid};
-    [] ->
-      undefined
-  end.
-
 %% @doc Cancel remote call job.
 
 -spec cancel(harpcaller:job_id()) ->
   ok | undefined.
 
-cancel(JobID) ->
-  case async_request(JobID, cancel) of
-    {ok, _Pid} -> ok;
-    undefined -> undefined
+cancel(JobID) when is_list(JobID) ->
+  case ets:lookup(?ETS_REGISTRY_TABLE, JobID) of
+    [{JobID, Pid}] ->
+      try
+        gen_server:call(Pid, cancel)
+      catch
+        exit:{timeout,_} ->
+          exit(Pid, cancel), % process hung up, kill it
+          ok;
+        exit:_ ->
+          % `{noproc,_}', `{StopReason,_}'
+          undefined
+      end;
+    [] ->
+      undefined
   end.
 
 %% @doc Retrieve result of a job (non-blocking).
@@ -175,12 +171,13 @@ get_result(JobID) ->
 -spec follow_stream(harpcaller:job_id()) ->
   {ok, Monitor :: reference()} | undefined.
 
-follow_stream(JobID) ->
-  case async_request(JobID, {follow, self()}) of
-    {ok, Pid} ->
+follow_stream(JobID) when is_list(JobID) ->
+  case ets:lookup(?ETS_REGISTRY_TABLE, JobID) of
+    [{JobID, Pid}] ->
+      gen_server:cast(Pid, {follow, self()}),
       MonRef = erlang:monitor(process, Pid),
       {ok, MonRef};
-    undefined ->
+    [] ->
       undefined
   end.
 
