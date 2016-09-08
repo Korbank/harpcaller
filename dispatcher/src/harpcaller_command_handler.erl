@@ -105,6 +105,16 @@ handle_command([{<<"command">>, <<"dist_stop">>}] = _Command, _Args) ->
   ok = indira_app:distributed_stop(),
   [{result, ok}];
 
+%%----------------------------------------------------------
+%% Log handling/rotation
+
+handle_command([{<<"command">>, <<"prune_jobs">>},
+                {<<"max_age">>, Age}] = _Command, _Args) ->
+  harp_sdb:remove_older(Age),
+  [{result, ok}];
+
+%%----------------------------------------------------------
+
 handle_command(_Command, _Args) ->
   [{error, <<"unsupported command">>}].
 
@@ -147,7 +157,10 @@ format_request({cancel_queue, Queue}) ->
 format_request(dist_start) ->
   [{command, dist_start}];
 format_request(dist_stop) ->
-  [{command, dist_stop}].
+  [{command, dist_stop}];
+
+format_request({prune_jobs, Days}) when is_integer(Days), Days > 0 ->
+  [{command, prune_jobs}, {max_age, Days * 24 * 3600}].
 
 parse_reply([{<<"result">>, <<"ok">>}] = _Reply, _Request) ->
   ok;

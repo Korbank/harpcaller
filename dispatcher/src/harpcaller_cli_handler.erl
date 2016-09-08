@@ -26,7 +26,8 @@
         | list_hosts | refresh_hosts
         | list_queues | {list_queue, harpcaller_call_queue:queue_name()}
         | {cancel_queue, harpcaller_call_queue:queue_name() | undefined}
-        | dist_start | dist_stop,
+        | dist_start | dist_stop
+        | prune_jobs,
   socket :: file:filename(),
   options :: [{atom(), term()}]
 }).
@@ -41,7 +42,10 @@
 parse_arguments(Args, [DefAdminSocket, DefConfigFile] = _DefaultValues) ->
   EmptyCommand = #cmd{
     socket = DefAdminSocket,
-    options = [{config, DefConfigFile}]
+    options = [
+      {config, DefConfigFile},
+      {age, 30} % default age for pruning stream logs
+    ]
   },
   case indira_cli:folds(fun cli_opt/2, EmptyCommand, Args) of
     {ok, Command = #cmd{op = start}} ->
@@ -151,6 +155,10 @@ format_request(status = _Op, _Command = #cmd{options = Options}) ->
     true  -> harpcaller_command_handler:format_request(status_wait);
     false -> harpcaller_command_handler:format_request(status)
   end,
+  {ok, Request};
+format_request(prune_jobs = _Op, _Command = #cmd{options = Options}) ->
+  Age = proplists:get_value(age, Options),
+  Request = harpcaller_command_handler:format_request({prune_jobs, Age}),
   {ok, Request};
 format_request(Op, _Command) ->
   Request = harpcaller_command_handler:format_request(Op),
@@ -421,12 +429,16 @@ help(Script) ->
     "  ", Script, " [--socket=...] queue-cancel <queue-name>\n",
     "Distributed Erlang support:\n",
     "  ", Script, " [--socket=...] dist-erl-start\n",
-    "  ", Script, " [--socket=...] dist-erl-stop\n"
+    "  ", Script, " [--socket=...] dist-erl-stop\n",
+    "Log handling/rotation:\n",
+    "  ", Script, " [--socket=...] prune-jobs [--age=<days>]\n"
   ].
 
 -spec cli_opt(string() | [string()], #cmd{}) ->
-  #cmd{} | {error, help | invalid_option | invalid_command | excessive_argument |
-                          invalid_timeout | invalid_queue_name}.
+  #cmd{} | {error, help | invalid_option | invalid_command |
+                          excessive_argument |
+                          invalid_pruning_age | invalid_timeout |
+                          invalid_queue_name}.
 
 cli_opt("--help", _Cmd) ->
   {error, help};
@@ -475,6 +487,20 @@ cli_opt(["--timeout", Seconds], Cmd = #cmd{options = Options}) ->
   catch
     error:_ ->
       {error, invalid_timeout}
+  end;
+
+cli_opt("--age=" ++ Days, Cmd) ->
+  cli_opt(["--age", Days], Cmd);
+cli_opt("--age", _Cmd) ->
+  {need, 1};
+cli_opt(["--age", Days], Cmd = #cmd{options = Options}) ->
+  try
+    Age = list_to_integer(Days),
+    true = (Age > 0),
+    _NewCmd = Cmd#cmd{options = [{age, Age} | Options]}
+  catch
+    error:_ ->
+      {error, invalid_pruning_age}
   end;
 
 cli_opt("-" ++ _, _Cmd) ->
@@ -533,6 +559,9 @@ cli_opt("dist-erl-start", Cmd = #cmd{op = undefined}) ->
 cli_opt("dist-erl-stop", Cmd = #cmd{op = undefined}) ->
   _NewCmd = Cmd#cmd{op = dist_stop};
 
+cli_opt("prune-jobs", Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = prune_jobs};
+
 cli_opt(_Arg, _Cmd = #cmd{op = undefined}) ->
   {error, invalid_command};
 
@@ -555,6 +584,8 @@ format_error({arguments, {invalid_command, Arg}}) ->
   ["invalid command: ", Arg];
 format_error({arguments, {excessive_argument, Arg}}) ->
   ["excessive argument: ", Arg];
+format_error({arguments, {invalid_pruning_age, _Arg}}) ->
+  "invalid log pruning age";
 format_error({arguments, {invalid_timeout, _Arg}}) ->
   "invalid timeout";
 format_error({arguments, {invalid_queue_name, _Arg}}) ->

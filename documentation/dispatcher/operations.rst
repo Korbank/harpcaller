@@ -37,6 +37,12 @@ Hosts registry (:ref:`ref <harpcaller-hosts>`):
     harpcallerd [options] hosts-list
     harpcallerd [options] hosts-refresh
 
+Log handling/rotation (:ref:`ref <harpcaller-logs>`):
+
+.. code-block:: none
+
+    harpcallerd [options] prune-jobs
+
 
 Commands
 --------
@@ -243,6 +249,19 @@ Hosts registry
 ``harpcallerd hosts-refresh``
    Order the HarpCaller to :ref:`refresh its hosts registry
    <harpcaller-hosts-reg-filler>` outside the schedule.
+
+.. _harpcaller-logs:
+
+Log handling/rotation
+~~~~~~~~~~~~~~~~~~~~~
+
+.. program:: harpcallerd prune-jobs
+
+``harpcallerd prune-jobs [--age=DAYS]``
+   Remove information about jobs older than ``DAYS`` (default: 30 days).
+
+   This command is mainly intended to work under :manpage:`cron(8)` or
+   :manpage:`logrotate(8)`.
 
 
 Configuration
