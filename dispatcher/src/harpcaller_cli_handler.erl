@@ -119,7 +119,7 @@ handle_command(status = Op,
   {ok, Request} = format_request(Op, Command),
   Timeout = proplists:get_value(timeout, Options, infinity),
   SendOpts = case proplists:get_bool(wait, Options) of
-    true  = Wait -> [{timeout, Timeout}, wait];
+    true  = Wait -> [{timeout, Timeout}, retry];
     false = Wait -> [{timeout, Timeout}]
   end,
   case indira_cli:send_one_command(indira_unix, Socket, Request, SendOpts) of
