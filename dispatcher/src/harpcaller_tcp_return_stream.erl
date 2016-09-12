@@ -21,8 +21,6 @@
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
--define(LOG_CAT, connection).
-
 -record(state, {
   client :: gen_tcp:socket(),
   job_id :: harpcaller:job_id(),
@@ -72,6 +70,7 @@ when Mode == follow; Mode == read ->
 
 init([] = _Args) ->
   % XXX: this will never be called
+  % NOTE: if ever called, remember to add `harpcaller_log:set_context()'
   State = #state{},
   {ok, State}.
 
@@ -112,51 +111,39 @@ handle_info({record, JobID, Id, Record} = _Message,
   end;
 
 handle_info({'DOWN', Monitor, process, Pid, Reason} = _Message,
-            State = #state{job_id = JobID, client = Client,
-                           job_monitor = Monitor}) ->
+            State = #state{job_monitor = Monitor}) ->
   % the process carrying out the job died
-  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
-  harpcaller_log:info(?LOG_CAT, "job died",
-                      [{client, {term, Peer}}, {job, {str, JobID}},
-                       {pid, {term, Pid}}, {reason, {term, Reason}}]),
-  FormattedResult = format_result(missing),
-  send_response(State, FormattedResult),
+  harpcaller_log:info("job died",
+                      [{pid, {term, Pid}}, {reason, {term, Reason}}]),
+  send_response(State, format_result(missing)),
   {stop, normal, State};
 
 handle_info({terminated, JobID, Result} = _Message,
-            State = #state{job_id = JobID, client = Client}) ->
+            State = #state{job_id = JobID}) ->
   % got our result; send it to the client
-  FormattedResult = format_result(Result),
-  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
-  harpcaller_log:info(?LOG_CAT, "job terminated",
-                      [{client, {term, Peer}}, {job, {str, JobID}},
-                       {result, FormattedResult}, {wait, true}]),
-  send_response(State, FormattedResult),
+  harpcaller_log:info("job terminated"),
+  send_response(State, format_result(Result)),
   {stop, normal, State};
 
 handle_info(timeout = _Message,
-            State = #state{job_id = JobID, client = Client}) ->
-  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
+            State = #state{job_id = JobID}) ->
   case State of
     #state{mode = follow, recent = 0} ->
       % special case when there's no need to read the history of stream
+      harpcaller_log:append_context([{wait, true}]),
       case harpcaller_caller:follow_stream(JobID) of
         {ok, MonRef} ->
-          harpcaller_log:info(?LOG_CAT, "job still running, reading the stream result",
-                              [{client, {term, Peer}}, {job, {str, JobID}},
-                               {wait, true}]),
+          harpcaller_log:info("job still running, reading the stream result"),
           NewState = State#state{job_monitor = MonRef},
           {noreply, NewState};
         undefined ->
+          harpcaller_log:info("job is already finished, returning result"),
           Result = harpcaller_caller:get_result(JobID),
-          FormattedResult = format_result(Result),
-          harpcaller_log:info(?LOG_CAT, "job is already finished, returning result",
-                              [{client, {term, Peer}}, {job, {str, JobID}},
-                               {result, FormattedResult}, {wait, true}]),
-          send_response(State, FormattedResult),
+          send_response(State, format_result(Result)),
           {stop, normal, State}
       end;
     #state{mode = follow} ->
+      harpcaller_log:append_context([{wait, true}]),
       Follow = harpcaller_caller:follow_stream(JobID),
       case read_stream(State) of
         {ok, NextId} ->
@@ -164,38 +151,28 @@ handle_info(timeout = _Message,
             {ok, MonRef} ->
               % TODO: if this operation specified an ID in the future, skip
               % those as well (probably in `handle_info({record, ...})')
-              harpcaller_log:info(?LOG_CAT, "job still running, reading the stream result",
-                                  [{client, {term, Peer}},
-                                   {job, {str, JobID}}, {wait, true}]),
+              harpcaller_log:info("job still running, reading the stream result"),
               flush_stream(JobID, NextId),
               NewState = State#state{job_monitor = MonRef},
               {noreply, NewState};
             undefined ->
+              harpcaller_log:info("job is already finished, returning result"),
               Result = harpcaller_caller:get_result(JobID),
-              FormattedResult = format_result(Result),
-              harpcaller_log:info(?LOG_CAT, "job is already finished, returning result",
-                                  [{client, {term, Peer}},
-                                   {job, {str, JobID}},
-                                   {result, FormattedResult}, {wait, true}]),
-              send_response(State, FormattedResult),
+              send_response(State, format_result(Result)),
               {stop, normal, State}
           end;
         {error, Reason} ->
-          FormattedResult = format_result({error, Reason}),
-          harpcaller_log:warn(?LOG_CAT, "reading job's recorded data failed",
-                              [{client, {term, Peer}}, {job, {str, JobID}},
-                               {reason, {term, Reason}}]),
-          send_response(State, FormattedResult),
+          harpcaller_log:warn("reading job's recorded data failed",
+                              [{reason, {term, Reason}}]),
+          send_response(State, format_result({error, Reason})),
           {stop, Reason, State}
       end;
     #state{mode = read} ->
+      harpcaller_log:append_context([{wait, false}]),
       read_stream(State), % don't care if successful or not
       Result = harpcaller_caller:get_result(JobID),
-      FormattedResult = format_result(Result),
-      harpcaller_log:info(?LOG_CAT, "returning job's result",
-                          [{client, {term, Peer}}, {job, {str, JobID}},
-                           {result, FormattedResult}, {wait, false}]),
-      send_response(State, FormattedResult),
+      harpcaller_log:info("returning job's result"),
+      send_response(State, format_result(Result)),
       {stop, normal, State}
   end;
 

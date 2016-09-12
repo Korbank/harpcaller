@@ -18,6 +18,8 @@
 -module(harpcaller_log).
 
 %% logging interface
+-export([set_context/2, append_context/1, get_context/0]).
+-export([info/1, warn/1, err/1]).
 -export([info/2, warn/2, err/2]).
 -export([info/3, warn/3, err/3]).
 %% event serialization
@@ -25,6 +27,8 @@
 
 %% supervision tree API
 -export([start/0, start_link/0]).
+
+-export_type([event_type/0, event_info/0, event_message/0]).
 
 %%%---------------------------------------------------------------------------
 
@@ -39,14 +43,57 @@
 %%% logging interface
 %%%---------------------------------------------------------------------------
 
-%% @doc Event of informative significance.
-%%   New client connected, issued a cancel order, submitted new job, etc.
+%% @doc Set logging context.
 
--spec info(event_type(), event_info()) ->
+-spec set_context(event_type(), event_info()) ->
   ok.
 
-info(EventType, EventInfo) ->
-  event(info, EventType, EventInfo).
+set_context(EventType, EventInfo) ->
+  put('$harpcaller_log', {EventType, EventInfo}),
+  ok.
+
+%% @doc Append information to logging context.
+
+-spec append_context(event_info()) ->
+  ok.
+
+append_context(EventInfo) ->
+  {EventType, EventContext} = get('$harpcaller_log'),
+  put('$harpcaller_log', {EventType, EventContext ++ EventInfo}),
+  ok.
+
+%% @doc Get logging context.
+
+-spec get_context() ->
+  {event_type(), event_info()} | undefined.
+
+get_context() ->
+  get('$harpcaller_log').
+
+%% @doc Event of informative significance.
+%%   New client connected, issued a cancel order, submitted new job, etc.
+%%
+%%   Function expects {@link set_context/2} to be called first.
+
+-spec info(event_message()) ->
+  ok.
+
+info(Message) ->
+  {EventType, EventContext} = get_context(),
+  event(info, EventType, [{message, message(Message)} | EventContext]).
+
+%% @doc Event of informative significance.
+%%   New client connected, issued a cancel order, submitted new job, etc.
+%%
+%%   Function expects {@link set_context/2} to be called first.
+
+-spec info(event_message(), event_info()) ->
+  ok.
+
+info(Message, EventInfo) ->
+  {EventType, EventContext} = get_context(),
+  event(info, EventType,
+        [{message, message(Message)} | EventInfo] ++ EventContext).
 
 %% @doc Event of informative significance.
 %%   New client connected, issued a cancel order, submitted new job, etc.
@@ -55,17 +102,34 @@ info(EventType, EventInfo) ->
   ok.
 
 info(EventType, Message, EventInfo) ->
-  info(EventType, [{message, message(Message)} | EventInfo]).
+  event(info, EventType, [{message, message(Message)} | EventInfo]).
 
 %% @doc Minor error event.
 %%   Typically the error has its cause in some remote entity (e.g. protocol
 %%   error), but it's harmless for the operation of HarpCaller.
+%%
+%%   Function expects {@link set_context/2} to be called first.
 
--spec warn(event_type(), event_info()) ->
+-spec warn(event_message()) ->
   ok.
 
-warn(EventType, EventInfo) ->
-  event(warning, EventType, EventInfo).
+warn(Message) ->
+  {EventType, EventContext} = get_context(),
+  event(warning, EventType, [{message, message(Message)} | EventContext]).
+
+%% @doc Minor error event.
+%%   Typically the error has its cause in some remote entity (e.g. protocol
+%%   error), but it's harmless for the operation of HarpCaller.
+%%
+%%   Function expects {@link set_context/2} to be called first.
+
+-spec warn(event_message(), event_info()) ->
+  ok.
+
+warn(Message, EventInfo) ->
+  {EventType, EventContext} = get_context(),
+  event(warning, EventType,
+        [{message, message(Message)} | EventInfo] ++ EventContext).
 
 %% @doc Minor error event.
 %%   Typically the error has its cause in some remote entity (e.g. protocol
@@ -75,17 +139,34 @@ warn(EventType, EventInfo) ->
   ok.
 
 warn(EventType, Message, EventInfo) ->
-  warn(EventType, [{message, message(Message)} | EventInfo]).
+  event(warning, EventType, [{message, message(Message)} | EventInfo]).
 
 %% @doc Major error event.
 %%   An unexpected event that should never occur, possibly threatening service
 %%   operation (or part of it).
+%%
+%%   Function expects {@link set_context/2} to be called first.
 
--spec err(event_type(), event_info()) ->
+-spec err(event_message()) ->
   ok.
 
-err(EventType, EventInfo) ->
-  event(error, EventType, EventInfo).
+err(Message) ->
+  {EventType, EventContext} = get_context(),
+  event(error, EventType, [{message, message(Message)} | EventContext]).
+
+%% @doc Major error event.
+%%   An unexpected event that should never occur, possibly threatening service
+%%   operation (or part of it).
+%%
+%%   Function expects {@link set_context/2} to be called first.
+
+-spec err(event_message(), event_info()) ->
+  ok.
+
+err(Message, EventInfo) ->
+  {EventType, EventContext} = get_context(),
+  event(error, EventType,
+        [{message, message(Message)} | EventInfo] ++ EventContext).
 
 %% @doc Major error event.
 %%   An unexpected event that should never occur, possibly threatening service
@@ -95,7 +176,7 @@ err(EventType, EventInfo) ->
   ok.
 
 err(EventType, Message, EventInfo) ->
-  err(EventType, [{message, message(Message)} | EventInfo]).
+  event(error, EventType, [{message, message(Message)} | EventInfo]).
 
 %%----------------------------------------------------------
 %% logging interface helpers

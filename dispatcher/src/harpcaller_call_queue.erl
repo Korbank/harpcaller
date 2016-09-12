@@ -26,8 +26,6 @@
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
--define(LOG_CAT, call_queue).
-
 -type queue_name() :: term().
 
 -record(state, {
@@ -133,6 +131,7 @@ start_link() ->
 %% @doc Initialize event handler.
 
 init(_Args) ->
+  harpcaller_log:set_context(call_queue, []),
   Queue = ets:new(queue, [bag]),
   QueueOpts = ets:new(queue_opts, [set, {keypos, #qopts.name}]),
   QueuePids = ets:new(queue_pids, [set, {keypos, #qpid.key}]),
@@ -167,7 +166,7 @@ handle_call({enqueue, Pid, QueueName, Concurrency} = _Request, _From, State) ->
   Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
   % create a queue if it doesn't exist already
   case create_queue(QueueName, Concurrency, State) of
-    true -> harpcaller_log:info(?LOG_CAT, "queue created",
+    true -> harpcaller_log:info("queue created",
                                 [{name, QueueName},
                                  {max_running, Concurrency}]);
     false -> ok
@@ -175,13 +174,13 @@ handle_call({enqueue, Pid, QueueName, Concurrency} = _Request, _From, State) ->
   case queue_status(QueueName, State) of
     #qopts{running = N, concurrency = C} when N < C ->
       % queue with spare room to run a task
-      harpcaller_log:info(?LOG_CAT, "queue has spare room, starting job",
+      harpcaller_log:info("queue has spare room, starting job",
                           [{pid, {term, Pid}}, {name, QueueName},
                            {running, N}, {max_running, C}]),
       make_running(Entry, QueueName, State);
     #qopts{running = N, concurrency = C} when N >= C ->
       % queue full of running tasks
-      harpcaller_log:info(?LOG_CAT, "queue maxed out, holding job",
+      harpcaller_log:info("queue maxed out, holding job",
                           [{pid, {term, Pid}}, {name, QueueName},
                            {max_running, C}]),
       add_queued(Entry, QueueName, State)
@@ -189,7 +188,7 @@ handle_call({enqueue, Pid, QueueName, Concurrency} = _Request, _From, State) ->
   {reply, QRef, State};
 
 handle_call({cancel, QueueName} = _Request, _From, State) ->
-  harpcaller_log:info(?LOG_CAT, "cancelling queue", [{name, QueueName}]),
+  harpcaller_log:info("cancelling queue", [{name, QueueName}]),
   [Pid ! {cancel, QRef} ||
     #qentry{pid = Pid, qref = QRef} <- list_queued(QueueName, State)],
   [Pid ! {cancel, QRef} ||
@@ -232,17 +231,17 @@ handle_info({'DOWN', MonRef, process, Pid, _Info} = _Message, State) ->
       case {QueuedTasks, RunningCount} of
         {[], _} when RunningCount > 0 ->
           % nothing left in queue, but there's still some processes running
-          harpcaller_log:info(?LOG_CAT, "running job stopped, nothing to run left",
+          harpcaller_log:info("running job stopped, nothing to run left",
                               [{pid, {term, Pid}}, {name, QueueName}]),
           ok;
         {[], 0} ->
           % nothing left in queue and this was the last running process
-          harpcaller_log:info(?LOG_CAT, "last running job stopped, queue empty",
+          harpcaller_log:info("last running job stopped, queue empty",
                               [{pid, {term, Pid}}, {name, QueueName}]),
           delete_queue(QueueName, State);
         {[NextEntry = #qentry{pid = NextPid} | _], _} ->
           % still something in the queue; make it running
-          harpcaller_log:info(?LOG_CAT, "running job stopped, starting another",
+          harpcaller_log:info("running job stopped, starting another",
                               [{pid, {term, Pid}}, {next_pid, {term, NextPid}},
                                {name, QueueName}]),
           make_running(NextEntry, QueueName, State)
@@ -251,7 +250,7 @@ handle_info({'DOWN', MonRef, process, Pid, _Info} = _Message, State) ->
       % NOTE: if this one is queued, it means the queue was full, so don't
       % delete it (the queue) just yet
       Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
-      harpcaller_log:info(?LOG_CAT, "waiting job stopped",
+      harpcaller_log:info("waiting job stopped",
                           [{pid, {term, Pid}}, {name, QueueName}]),
       delete_queued(Entry, QueueName, State),
       ok

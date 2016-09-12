@@ -25,7 +25,6 @@
 %%%---------------------------------------------------------------------------
 
 -define(MAX_LINE, 4096).
--define(LOG_CAT, hostdb_refresh).
 
 -record(state, {
   command :: string(),
@@ -74,6 +73,7 @@ start_link() ->
 %% @doc Initialize event handler.
 
 init(_Args) ->
+  harpcaller_log:set_context(hostdb_refresh, []),
   {ok, RefreshCommand} = application:get_env(host_db_script),
   {ok, RefreshInterval} = application:get_env(host_db_refresh),
   State = #state{
@@ -110,7 +110,7 @@ handle_call(_Request, _From, State) ->
 %% @doc Handle {@link gen_server:cast/2}.
 
 handle_cast(refresh_now = _Request, State) ->
-  harpcaller_log:info(?LOG_CAT, "refresh request outside the schedule", []),
+  harpcaller_log:info("refresh request outside the schedule"),
   % execute the command or no-op if a command is already running
   Port = execute(State),
   NewState = State#state{port = Port},
@@ -140,7 +140,7 @@ handle_info({Port, {exit_status, ExitStatus}} = _Message,
   case ExitStatus of
     0 ->
       % send the update
-      harpcaller_log:info(?LOG_CAT, "refresh script terminated",
+      harpcaller_log:info("refresh script terminated",
                           [{exit_code, ExitStatus}]),
       Entries = dict:fold(
         fun(_Name, Entry, Acc) -> [Entry | Acc] end,
@@ -151,7 +151,7 @@ handle_info({Port, {exit_status, ExitStatus}} = _Message,
     _ ->
       % only use successful runs, otherwise the script could have died of some
       % unexpected reason and it would clear the known hosts registry
-      harpcaller_log:warn(?LOG_CAT, "refresh script terminated abnormally",
+      harpcaller_log:warn("refresh script terminated abnormally",
                           [{exit_code, ExitStatus}]),
       ignore
   end,
@@ -163,8 +163,7 @@ handle_info({Port, {exit_status, ExitStatus}} = _Message,
 
 handle_info(refresh = _Message, State = #state{interval = RefreshInterval}) ->
   % schedule the next refresh
-  harpcaller_log:info(?LOG_CAT, "refreshing on schedule",
-                      [{schedule, RefreshInterval}]),
+  harpcaller_log:info("refreshing on schedule", [{schedule, RefreshInterval}]),
   erlang:send_after(RefreshInterval * 1000, self(), refresh),
   % execute the command or no-op if a command is already running
   Port = execute(State),
@@ -197,11 +196,10 @@ code_change(_OldVsn, State, _Extra) ->
   port().
 
 execute(_State = #state{port = undefined, command = Command}) ->
-  harpcaller_log:info(?LOG_CAT, "starting refresh script",
-                      [{command, {str, Command}}]),
+  harpcaller_log:info("starting refresh script", [{command, {str, Command}}]),
   open_port({spawn_executable, Command}, [{line, ?MAX_LINE}, in, exit_status]);
 execute(_State = #state{port = Port}) when is_port(Port) ->
-  harpcaller_log:info(?LOG_CAT, "refresh script is already running", []),
+  harpcaller_log:info("refresh script is already running"),
   Port.
 
 %% @doc Decode a JSON line to host entry

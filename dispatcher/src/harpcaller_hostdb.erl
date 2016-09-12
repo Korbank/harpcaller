@@ -11,6 +11,7 @@
 
 %% public interface
 -export([resolve/1, refresh/0, list/0]).
+-export([format_address/1]).
 
 %% supervision tree API
 -export([start/0, start_link/0]).
@@ -26,8 +27,6 @@
 
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
-
--define(LOG_CAT, hostdb).
 
 -record(state, {
   table :: dets:tab_name()
@@ -97,6 +96,7 @@ start_link() ->
 %% @doc Initialize event handler.
 
 init(_Args) ->
+  harpcaller_log:set_context(hostdb, []),
   {ok, TableFile} = application:get_env(host_db),
   {ok, Table} = dets:open_file(TableFile, [{type, set}]),
   State = #state{
@@ -169,7 +169,7 @@ handle_cast(_Request, State) ->
 %% @doc Handle incoming messages.
 
 handle_info({fill, Entries} = _Message, State = #state{table = Table}) ->
-  harpcaller_log:info(?LOG_CAT, "known hosts registry refreshed",
+  harpcaller_log:info("known hosts registry refreshed",
                       [{entries, length(Entries)}]),
   {MS,S,_US} = os:timestamp(),
   Timestamp = MS * 1000 * 1000 + S,
@@ -200,6 +200,25 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% }}}
 %%----------------------------------------------------------
+
+%%%---------------------------------------------------------------------------
+
+-spec format_address(harpcaller:address()) ->
+  string().
+
+format_address(Address) when is_list(Address) ->
+  Address;
+format_address(Address) when is_atom(Address) ->
+  atom_to_list(Address);
+format_address({A,B,C,D} = _Address) ->
+  % TODO: IPv6
+  OctetList = [
+    integer_to_list(A),
+    integer_to_list(B),
+    integer_to_list(C),
+    integer_to_list(D)
+  ],
+  string:join(OctetList, ".").
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

@@ -23,8 +23,6 @@
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
--define(LOG_CAT, connection).
-
 -define(TCP_READ_INTERVAL, 100).
 
 -record(state, {socket}).
@@ -83,8 +81,13 @@ start_link(Socket) ->
 %% @doc Initialize event handler.
 
 init([Socket] = _Args) ->
-  % we can't read the request here, as parent supervisor waits init() to
+  % XXX: we can't read the request here, as parent supervisor waits init() to
   % return
+  {ok, {PeerAddr, PeerPort}} = inet:peername(Socket),
+  harpcaller_log:set_context(connection, [
+    {client, {str, format_address(PeerAddr, PeerPort)}}
+  ]),
+  harpcaller_log:info("new connection"),
   inet:setopts(Socket, [binary, {packet, line}, {active, false}]),
   State = #state{
     socket = Socket
@@ -120,16 +123,14 @@ handle_cast(_Request, State) ->
 %% @doc Handle incoming messages.
 
 handle_info(timeout = _Message, State = #state{socket = Socket}) ->
-  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Socket),
   case read_request(Socket, ?TCP_READ_INTERVAL) of
     {call, Proc, Args, Host, Timeout, MaxExecTime, Queue} -> % long running
       put('$worker_function', call),
-      harpcaller_log:info(?LOG_CAT, "call request",
-                          [{client, {term, Peer}},
-                           {host, Host},
-                           {procedure, Proc}, {procedure_arguments, Args},
-                           {timeout, Timeout}, {max_exec_time, MaxExecTime},
-                           {queue, queue_log_info(Queue)}]),
+      harpcaller_log:info("call request", [
+        {host, Host}, {procedure, Proc}, {procedure_arguments, Args},
+        {timeout, Timeout}, {max_exec_time, MaxExecTime},
+        {queue, queue_log_info(Queue)}
+      ]),
       Options = case {Timeout, MaxExecTime} of
         {undefined, undefined} ->
           [];
@@ -146,6 +147,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       end,
       {ok, _Pid, JobID} =
         harpcaller_caller:call(Proc, Args, Host, QueueOpts ++ Options),
+      harpcaller_log:info("call process started", [{job, {str, JobID}}]),
       send_response(Socket, [
         {<<"harpcaller">>, 1},
         {<<"job_id">>, list_to_binary(JobID)}
@@ -153,8 +155,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       {stop, normal, State};
     {cancel, JobID} -> % immediate
       put('$worker_function', cancel),
-      harpcaller_log:info(?LOG_CAT, "cancel job",
-                          [{client, {term, Peer}}, {job, {str, JobID}}]),
+      harpcaller_log:info("cancel job", [{job, {str, JobID}}]),
       case harpcaller_caller:cancel(JobID) of
         ok        -> send_response(Socket, [{<<"cancelled">>, true}]);
         undefined -> send_response(Socket, [{<<"cancelled">>, false}])
@@ -166,16 +167,15 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
         wait -> true;
         no_wait -> false
       end,
-      harpcaller_log:info(?LOG_CAT, "get job's result",
-                          [{client, {term, Peer}}, {job, {str, JobID}},
-                           {wait, Wait}]),
+      harpcaller_log:append_context([{job, {str, JobID}}]),
+      harpcaller_log:info("get job's result", [{wait, Wait}]),
       NewState = harpcaller_tcp_return_result:state(Socket, JobID, Wait),
       % this does not return to this code
       gen_server:enter_loop(harpcaller_tcp_return_result, [], NewState, 0);
     {get_status, JobID} -> % immediate
       put('$worker_function', get_status),
-      harpcaller_log:info(?LOG_CAT, "get job's status",
-                          [{client, {term, Peer}}, {job, {str, JobID}}]),
+      harpcaller_log:append_context([{job, {str, JobID}}]),
+      harpcaller_log:info("get job's status"),
       case job_status(JobID) of
         {ok, JobStatus} ->
           send_response(Socket, JobStatus);
@@ -187,8 +187,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
             ]}
           ]);
         {error, Reason} -> % `Reason' is a binary
-          harpcaller_log:warn(?LOG_CAT, "job status reading error",
-                              [{job, {str, JobID}}, {reason, Reason}]),
+          harpcaller_log:warn("job status reading error", [{reason, Reason}]),
           send_response(Socket, [
             {<<"error">>, [
               {<<"type">>, <<"unrecognized">>},
@@ -200,16 +199,16 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
     {follow_stream, JobID, Mode, ModeArg} -> % long running
       % `Mode :: recent | since'
       put('$worker_function', follow_stream),
-      harpcaller_log:info(?LOG_CAT, "follow job's streamed result",
-                          [{client, {term, Peer}}, {job, {str, JobID}}]),
+      harpcaller_log:append_context([{job, {str, JobID}}]),
+      harpcaller_log:info("follow job's streamed result"),
       NewState = harpcaller_tcp_return_stream:state(Socket, JobID, follow, {Mode, ModeArg}),
       % this does not return to this code
       gen_server:enter_loop(harpcaller_tcp_return_stream, [], NewState, 0);
     {read_stream, JobID, Mode, ModeArg} -> % immediate
       % `Mode :: recent | since'
       put('$worker_function', read_stream),
-      harpcaller_log:info(?LOG_CAT, "follow job's streamed result",
-                          [{client, {term, Peer}}, {job, {str, JobID}}]),
+      harpcaller_log:append_context([{job, {str, JobID}}]),
+      harpcaller_log:info("follow job's streamed result"),
       NewState = harpcaller_tcp_return_stream:state(Socket, JobID, read, {Mode, ModeArg}),
       % this does not return to this code
       gen_server:enter_loop(harpcaller_tcp_return_stream, [], NewState, 0);
@@ -217,8 +216,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       % yield for next system message if any awaits our attention
       {noreply, State, 0};
     {error, Reason} ->
-      harpcaller_log:warn(?LOG_CAT, "request reading error",
-                          [{client, {term, Peer}}, {reason, {term, Reason}}]),
+      harpcaller_log:warn("request reading error", [{reason, {term, Reason}}]),
       {stop, Reason, State}
   end;
 
@@ -442,6 +440,21 @@ job_status(JobID) ->
 
 undef_null(undefined = _Value) -> null;
 undef_null(Value) -> Value.
+
+%%%---------------------------------------------------------------------------
+
+-spec format_address(inet:ip_address(), inet:port_number()) ->
+  string().
+
+format_address({A,B,C,D} = _Address, Port) ->
+  % TODO: IPv6
+  OctetList = [
+    integer_to_list(A),
+    integer_to_list(B),
+    integer_to_list(C),
+    integer_to_list(D)
+  ],
+  string:join(OctetList, ".") ++ ":" ++ integer_to_list(Port).
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

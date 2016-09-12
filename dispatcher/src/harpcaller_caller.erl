@@ -27,8 +27,6 @@
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
--define(LOG_CAT, caller).
-
 %% I should probably keep `max_exec_time' and `timeout' as microseconds to
 %% avoid multiplication and division, but `timeout()' type is usually
 %% milliseconds (e.g. in `receive .. end'), so let's leave it this way
@@ -58,7 +56,7 @@
                 Concurrency :: pos_integer()}}.
 
 -record(ssl_verify, {
-  job_id :: harpcaller:job_id(), % for logging
+  log_context :: {harpcaller_log:event_type(), harpcaller_log:event_info()},
   ca_path_valid = true :: boolean(),
   expected_hostname = any :: binary() | any
 }).
@@ -237,6 +235,8 @@ start_link(Procedure, ProcArgs, Host, Options) ->
 %% @doc Initialize event handler.
 
 init([] = _Args) ->
+  % XXX: log context is set in `handle_call(start_call)', which is called
+  % immediately after spawning this process
   JobID = harpcaller:generate_job_id(),
   ets:insert(?ETS_REGISTRY_TABLE, [
     {JobID, self()},
@@ -273,8 +273,12 @@ terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
 handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
             State = #state{job_id = JobID, call = undefined}) ->
   {Timeout, MaxExecTime, Queue} = decode_options(Options),
-  harpcaller_log:info(?LOG_CAT, "starting a new call",
-                      [{job, {str, JobID}}]),
+  harpcaller_log:set_context(caller, [
+    {job, {str, JobID}},
+    {host, Host}, % Host :: binary()
+    {procedure, ensure_binary(Procedure)}
+  ]),
+  harpcaller_log:info("starting a new call"),
   case harp_sdb:new(JobID, Procedure, ProcArgs, Host) of
     {ok, StreamTable} ->
       gen_server:reply(From, {ok, JobID}),
@@ -287,8 +291,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
       case Queue of
         undefined ->
           % execute immediately
-          harpcaller_log:info(?LOG_CAT, "starting immediately",
-                              [{job, {str, JobID}}]),
+          harpcaller_log:info("starting immediately"),
           case start_request(FilledState) of
             {ok, Handle} ->
               Now = now(),
@@ -299,9 +302,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
               },
               {noreply, NewState, 0};
             {error, Reason} ->
-              harpcaller_log:warn(?LOG_CAT, "call failed",
-                                  [{job, {str, JobID}},
-                                  {reason, {term, Reason}}]),
+              harpcaller_log:warn("call failed", [{reason, {term, Reason}}]),
               harp_sdb:set_result(StreamTable, {error, Reason}),
               % request itself failed, but the job was carried successfully;
               % tell the parent that that part got done
@@ -309,8 +310,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
           end;
         {QueueName, Concurrency} ->
           % enqueue and wait for a message
-          harpcaller_log:info(?LOG_CAT, "waiting for a queue",
-                              [{job, {str, JobID}}, {queue, QueueName}]),
+          harpcaller_log:info("waiting for a queue", [{queue, QueueName}]),
           QRef = harpcaller_call_queue:enqueue(QueueName, Concurrency),
           NewState = FilledState#state{
             call = {queued, QRef}
@@ -318,8 +318,8 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
           {noreply, NewState}
       end;
     {error, Reason} ->
-      harpcaller_log:err(?LOG_CAT, "opening stream storage failed",
-                         [{job, {str, JobID}}, {error, {term, Reason}}]),
+      harpcaller_log:err("opening stream storage failed",
+                         [{error, {term, Reason}}]),
       % operational and (mostly) unexpected error; signal crashing
       StopReason = {open, Reason},
       {stop, StopReason, {error, StopReason}, State}
@@ -342,7 +342,7 @@ handle_cast({follow, Pid} = _Request, State = #state{followers = Followers}) ->
 
 handle_cast(cancel = _Request,
             State = #state{stream_table = StreamTable, job_id = JobID}) ->
-  harpcaller_log:info(?LOG_CAT, "got a cancel order", [{job, {str, JobID}}]),
+  harpcaller_log:info("got a cancel order"),
   notify_followers(State, {terminated, JobID, cancelled}),
   harp_sdb:set_result(StreamTable, cancelled),
   {stop, normal, State};
@@ -362,15 +362,15 @@ handle_info({'DOWN', Ref, process, Pid, _Reason} = _Message,
 handle_info({cancel, _QRef} = _Message,
             State = #state{stream_table = StreamTable, job_id = JobID}) ->
   % NOTE: the same as `cancel()' call, except it's a message
-  harpcaller_log:info(?LOG_CAT, "got a cancel order", [{job, {str, JobID}}]),
+  harpcaller_log:info("got a cancel order"),
   notify_followers(State, {terminated, JobID, cancelled}),
   harp_sdb:set_result(StreamTable, cancelled),
   {stop, normal, State};
 
 handle_info({go, QRef} = _Message,
-            State = #state{call = {queued, QRef}, job_id = JobID,
+            State = #state{call = {queued, QRef},
                            stream_table = StreamTable}) ->
-  harpcaller_log:info(?LOG_CAT, "job dequeued", [{job, {str, JobID}}]),
+  harpcaller_log:info("job dequeued"),
   case start_request(State) of
     {ok, Handle} ->
       Now = now(),
@@ -381,8 +381,7 @@ handle_info({go, QRef} = _Message,
       },
       {noreply, NewState, 0};
     {error, Reason} ->
-      harpcaller_log:warn(?LOG_CAT, "call failed",
-                          [{job, {str, JobID}}, {reason, {term, Reason}}]),
+      harpcaller_log:warn("call failed", [{reason, {term, Reason}}]),
       harp_sdb:set_result(StreamTable, {error, Reason}),
       % request itself failed, but the job was carried successfully;
       % tell the parent that that part got done
@@ -408,14 +407,13 @@ handle_info(timeout = _Message,
         #state{timeout = Timeout} when ReadTime >= Timeout ->
           TimeoutDesc = {<<"timeout">>, <<"reading result timed out">>},
           notify_followers(State, {terminated, JobID, {error, TimeoutDesc}}),
-          harpcaller_log:warn(?LOG_CAT, "read timeout", [{job, {str, JobID}}]),
+          harpcaller_log:warn("read timeout; stopping"),
           ok = harp_sdb:set_result(StreamTable, {error, TimeoutDesc}),
           {stop, normal, State};
         #state{max_exec_time = MaxExecTime} when RunTime >= MaxExecTime ->
           TimeoutDesc = {<<"timeout">>, <<"maximum execution time exceeded">>},
           notify_followers(State, {terminated, JobID, {error, TimeoutDesc}}),
-          harpcaller_log:warn(?LOG_CAT, "total execution time exceeded",
-                              [{job, {str, JobID}}]),
+          harpcaller_log:warn("total execution time exceeded"),
           ok = harp_sdb:set_result(StreamTable, {error, TimeoutDesc}),
           {stop, normal, State};
         _ ->
@@ -428,20 +426,18 @@ handle_info(timeout = _Message,
       {noreply, NewState, 0};
     {result, Result} ->
       notify_followers(State, {terminated, JobID, {return, Result}}),
-      harpcaller_log:info(?LOG_CAT, "job finished",
-                          [{job, {str, JobID}}, {reason, return}]),
+      harpcaller_log:info("job finished", [{reason, return}]),
       ok = harp_sdb:set_result(StreamTable, {return, Result}),
       {stop, normal, State};
     {exception, Exception} ->
       notify_followers(State, {terminated, JobID, {exception, Exception}}),
-      harpcaller_log:info(?LOG_CAT, "job finished",
-                          [{job, {str, JobID}}, {reason, exception}]),
+      harpcaller_log:info("job finished", [{reason, exception}]),
       ok = harp_sdb:set_result(StreamTable, {exception, Exception}),
       {stop, normal, State};
     {error, Reason} ->
       notify_followers(State, {terminated, JobID, {error, Reason}}),
-      harpcaller_log:warn(?LOG_CAT, "job finished abnormally",
-                          [{job, {str, JobID}}, {reason, {term, Reason}}]),
+      harpcaller_log:warn("job finished abnormally",
+                          [{reason, {term, Reason}}]),
       ok = harp_sdb:set_result(StreamTable, {error, Reason}),
       {stop, normal, State}
   end;
@@ -508,12 +504,16 @@ send_message({Pid, _Ref} = _Entry, Message) ->
 -spec start_request(#state{}) ->
   {ok, harp:handle()} | {error, term()}.
 
-start_request(State = #state{request = {Procedure, ProcArgs, Hostname},
-                             stream_table = StreamTable}) ->
+start_request(_State = #state{request = {Procedure, ProcArgs, Hostname},
+                              stream_table = StreamTable}) ->
   case harpcaller_hostdb:resolve(Hostname) of
     {Hostname, Address, Port, {User, Password} = _Credentials} ->
+      harpcaller_log:append_context([
+        {address, {str, harpcaller_hostdb:format_address(Address)}},
+        {port, Port}
+      ]),
       harp_sdb:started(StreamTable),
-      SSLVerifyOpts = ssl_verify_options(State),
+      SSLVerifyOpts = ssl_verify_options(),
       RequestOpts = [
         {host, Address}, {port, Port},
         {user, User}, {password, Password},
@@ -524,14 +524,14 @@ start_request(State = #state{request = {Procedure, ProcArgs, Hostname},
       {error, unknown_host}
   end.
 
-ssl_verify_options(_State = #state{job_id = JobID}) ->
+ssl_verify_options() ->
   CAOpts = case application:get_env(ca_file) of
     {ok, CAFile} -> [{cafile, CAFile}];
     undefined -> []
   end,
   VerifyOpts = case application:get_env(known_certs_file) of
     {ok, _KnownCertsFile} ->
-      VerifyArg = #ssl_verify{job_id = JobID},
+      VerifyArg = #ssl_verify{log_context = harpcaller_log:get_context()},
       [{ssl_verify, {fun verify_cert/3, VerifyArg}}];
     undefined ->
       % FIXME: no certificate verification logs when only `ca_file' defined
@@ -550,15 +550,16 @@ verify_cert(_Cert, {extension, _} = _Event, Options) ->
   {unknown, Options};
 
 verify_cert(_Cert, _Event,
-            _Options = #ssl_verify{ca_path_valid = false, job_id = JobID}) ->
+            _Options = #ssl_verify{ca_path_valid = false,
+                                   log_context = {LogType, LogInfo}}) ->
   % there was an invalid certificate somewhere above, even if accepted
   % conditionally; signal it's an unknown CA
-  harpcaller_log:info(?LOG_CAT, "invalid server certificate (parent CA whitelisted)",
-                      [{job, {str, JobID}}]),
+  harpcaller_log:info(LogType, "invalid server certificate (parent CA whitelisted)",
+                      LogInfo),
   {fail, {error, unknown_ca}};
 
 verify_cert(Cert, {bad_cert, _} = Event,
-            Options = #ssl_verify{job_id = JobID}) ->
+            Options = #ssl_verify{log_context = {LogType, LogInfo}}) ->
   % if the certificate is in known certs store, accept it conditionally:
   % if it's a leaf, then the cert is valid, but if it's used as a CA,
   % verification will be rejected
@@ -567,8 +568,7 @@ verify_cert(Cert, {bad_cert, _} = Event,
     true ->
       {valid, NewOptions};
     false ->
-      harpcaller_log:info(?LOG_CAT, "invalid server certificate",
-                          [{job, {str, JobID}}]),
+      harpcaller_log:info(LogType, "invalid server certificate", LogInfo),
       {fail, Event}
   end;
 
@@ -577,6 +577,18 @@ verify_cert(_Cert, valid = _Event, Options) ->
 
 verify_cert(_Cert, valid_peer = _Event, Options) ->
   {valid, Options}. % TODO: verify hostname
+
+%%%---------------------------------------------------------------------------
+
+-spec ensure_binary(atom() | string() | binary()) ->
+  binary().
+
+ensure_binary(Name) when is_atom(Name) ->
+  atom_to_binary(Name, utf8);
+ensure_binary(Name) when is_list(Name) ->
+  list_to_binary(Name);
+ensure_binary(Name) when is_binary(Name) ->
+  Name.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

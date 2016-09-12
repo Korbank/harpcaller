@@ -21,8 +21,6 @@
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
--define(LOG_CAT, connection).
-
 -record(state, {
   client :: gen_tcp:socket(),
   job_id :: harpcaller:job_id(),
@@ -59,6 +57,7 @@ state(Client, JobID, Wait) when Wait == true; Wait == false ->
 
 init([] = _Args) ->
   % XXX: this will never be called
+  % NOTE: if ever called, remember to add `harpcaller_log:set_context()'
   State = #state{},
   {ok, State}.
 
@@ -96,59 +95,42 @@ handle_info({record, JobID, _Id, _Record} = _Message,
   {noreply, State};
 
 handle_info({'DOWN', Monitor, process, Pid, Reason} = _Message,
-            State = #state{job_id = JobID, client = Client,
-                           job_monitor = Monitor}) ->
+            State = #state{job_monitor = Monitor}) ->
   % the process carrying out the job died
-  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
-  harpcaller_log:info(?LOG_CAT, "job died",
-                      [{client, {term, Peer}}, {job, {str, JobID}},
-                       {pid, {term, Pid}}, {reason, {term, Reason}}]),
-  FormattedResult = format_result(missing),
-  send_response(State, FormattedResult),
+  harpcaller_log:info("job died",
+                      [{pid, {term, Pid}}, {reason, {term, Reason}}]),
+  send_response(State, format_result(missing)),
   {stop, normal, State};
 
 handle_info({terminated, JobID, Result} = _Message,
-            State = #state{job_id = JobID, client = Client}) ->
+            State = #state{job_id = JobID}) ->
   % got our result; send it to the client
-  FormattedResult = format_result(Result),
-  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
-  harpcaller_log:info(?LOG_CAT, "job terminated",
-                      [{client, {term, Peer}}, {job, {str, JobID}},
-                       {result, FormattedResult}, {wait, true}]),
-  send_response(State, FormattedResult),
+  harpcaller_log:info("job terminated"),
+  send_response(State, format_result(Result)),
   {stop, normal, State};
 
 handle_info(timeout = _Message,
-            State = #state{job_id = JobID, client = Client, wait = false}) ->
+            State = #state{job_id = JobID, wait = false}) ->
+  harpcaller_log:append_context([{wait, false}]),
   Value = harpcaller_caller:get_result(JobID),
-  FormattedResult = format_result(Value),
-  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
-  harpcaller_log:info(?LOG_CAT, "returning job's result",
-                      [{client, {term, Peer}}, {job, {str, JobID}},
-                       {result, FormattedResult}, {wait, false}]),
-  send_response(State, FormattedResult),
+  harpcaller_log:info("returning job's result"),
+  send_response(State, format_result(Value)),
   {stop, normal, State};
 
 handle_info(timeout = _Message,
-            State = #state{job_id = JobID, client = Client, wait = true}) ->
-  {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
+            State = #state{job_id = JobID, wait = true}) ->
+  harpcaller_log:append_context([{wait, true}]),
   case harpcaller_caller:follow_stream(JobID) of
     {ok, MonRef} ->
       % consume+ignore all the stream, waiting for the result
-      harpcaller_log:info(?LOG_CAT, "job still running, waiting for the result",
-                          [{client, {term, Peer}}, {job, {str, JobID}},
-                           {wait, true}]),
+      harpcaller_log:info("job still running, waiting for the result"),
       NewState = State#state{job_monitor = MonRef},
       {noreply, NewState};
     undefined ->
       % no process to follow, so it must terminated already
       Value = harpcaller_caller:get_result(JobID),
-      FormattedResult = format_result(Value),
-      {ok, {_PeerAddr, _PeerPort} = Peer} = inet:peername(Client),
-      harpcaller_log:info(?LOG_CAT, "returning job's result",
-                          [{client, {term, Peer}}, {job, {str, JobID}},
-                           {result, FormattedResult}, {wait, true}]),
-      send_response(State, FormattedResult),
+      harpcaller_log:info("returning job's result"),
+      send_response(State, format_result(Value)),
       {stop, normal, State}
   end;
 
