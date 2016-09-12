@@ -79,7 +79,7 @@ cookie_file = "/etc/harpcaller/cookie.txt"
 # ("harpcallerd dist-erl-start")
 distributed_immediate = false
 
-# event handlers for error_logger (Erlang system events) to add when starting
-error_logger_handlers = []
+# file with Erlang system events log
+#log_file = "/var/log/harpcaller/erlang.log"
 
 # vim:ft=dosini

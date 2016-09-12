@@ -27,7 +27,7 @@
         | list_queues | {list_queue, harpcaller_call_queue:queue_name()}
         | {cancel_queue, harpcaller_call_queue:queue_name() | undefined}
         | dist_start | dist_stop
-        | prune_jobs,
+        | prune_jobs | reopen_logs,
   socket :: file:filename(),
   options :: [{atom(), term()}]
 }).
@@ -238,15 +238,18 @@ print_json(Struct) ->
   {ok, IndiraOptions :: [{atom(), term()}]} | {error, term()}.
 
 setup_applications(Config, Options) ->
-  % TODO: add support for `erlang.error_logger_handlers' option back (maybe
-  % better this time)
   case setup_harpcaller(Config) of
-    ok -> indira_options(Config, Options);
-    {error, Reason} -> {error, Reason}
+    ok ->
+      case setup_logging(Config, Options) of
+        ok -> indira_options(Config, Options);
+        {error, Reason} -> {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
   end.
 
 %%----------------------------------------------------------
-%% setup HarpCaller and Indira {{{
+%% setup HarpCaller, Indira, and `error_logger' {{{
 
 -spec setup_harpcaller([{binary(), term()}]) ->
   ok | {error, {invalid_option_format, binary()} | no_listen_addresses}.
@@ -293,21 +296,41 @@ indira_options(Config, Options) ->
     end,
     NetStart = proplists:get_value(<<"distributed_immediate">>, ErlangConfig, false),
     true = is_boolean(NetStart),
-    AdditionalOptions = case proplists:get_bool(debug, Options) of
-      true -> [{start_before, sasl}];
-      false -> []
-    end,
     IndiraOptions = [
       {pidfile, PidFile},
       {node_name, make_atom(NodeName)},
       {name_type, make_atom(NameType)},
       {cookie, Cookie},
-      {net_start, NetStart} |
-      AdditionalOptions
+      {net_start, NetStart}
     ],
     {ok, IndiraOptions}
   catch
     error:_ ->
+      {error, invalid_option_format}
+  end.
+
+-spec setup_logging([{binary(), term()}], [{atom(), term()}]) ->
+  ok | {error, invalid_option_format | {log_file, file:posix()} |
+               bad_logger_module}.
+
+setup_logging(Config, Options) ->
+  case proplists:get_bool(debug, Options) of
+    true -> ok = application:start(sasl);
+    false -> ok
+  end,
+  ErlangConfig = proplists:get_value(<<"erlang">>, Config, []),
+  case proplists:get_value(<<"log_file">>, ErlangConfig) of
+    File when is_binary(File) ->
+      % XXX: see also `harpcaller_command_handler:handle_command()'
+      ok = indira_app:set_option(indira, error_logger_file, File),
+      case error_logger:add_report_handler(harpcaller_disk_h, [File]) of
+        ok -> ok;
+        {error, Reason} -> {error, {log_file, Reason}};
+        {'EXIT', _Reason} -> {error, bad_logger_module}
+      end;
+    undefined ->
+      ok;
+    _ ->
       {error, invalid_option_format}
   end.
 
@@ -431,7 +454,8 @@ help(Script) ->
     "  ", Script, " [--socket=...] dist-erl-start\n",
     "  ", Script, " [--socket=...] dist-erl-stop\n",
     "Log handling/rotation:\n",
-    "  ", Script, " [--socket=...] prune-jobs [--age=<days>]\n"
+    "  ", Script, " [--socket=...] prune-jobs [--age=<days>]\n",
+    "  ", Script, " [--socket=...] reopen-logs\n"
   ].
 
 -spec cli_opt(string() | [string()], #cmd{}) ->
@@ -562,6 +586,9 @@ cli_opt("dist-erl-stop", Cmd = #cmd{op = undefined}) ->
 cli_opt("prune-jobs", Cmd = #cmd{op = undefined}) ->
   _NewCmd = Cmd#cmd{op = prune_jobs};
 
+cli_opt("reopen-logs", Cmd = #cmd{op = undefined}) ->
+  _NewCmd = Cmd#cmd{op = reopen_logs};
+
 cli_opt(_Arg, _Cmd = #cmd{op = undefined}) ->
   {error, invalid_command};
 
@@ -626,9 +653,13 @@ format_error({invalid_option_format, Option}) ->
   ["invalid config option: ", Option];
 format_error(no_listen_addresses) ->
   "no listen addresses in configuration";
-%% indira_options()
+%% indira_options() and setup_logging()
 format_error(invalid_option_format) ->
   "invalid config option in [erlang] section";
+format_error(bad_logger_module) ->
+  "can't load `harpcaller_disk_h' module";
+format_error({log_file, Reason}) ->
+  ["log writing error: ", file:format_error(Reason)];
 
 %% options to indira_app:daemonize() are guaranteed to be of proper format
 

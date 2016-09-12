@@ -27,6 +27,7 @@
     {default_timeout, 600}, % seconds
     {max_exec_time,   600}, % seconds
     {log_handlers, []}, % for harpcaller_log; list of `{Module :: atom(), Args :: term()}'
+    %{error_logger_file, ""},
     {listen, [
       {any, 3502}
     ]}

@@ -113,6 +113,24 @@ handle_command([{<<"command">>, <<"prune_jobs">>},
   harp_sdb:remove_older(Age),
   [{result, ok}];
 
+handle_command([{<<"command">>, <<"reopen_logs">>}] = _Command, _Args) ->
+  % the only log file that can possibly be opened is disk log for error_logger
+  case application:get_env(harpcaller, error_logger_file) of
+    {ok, File} ->
+      case reopen_error_logger_file(File) of
+        ok ->
+          [{result, ok}];
+        {error, bad_logger_module} ->
+          [{result, error},
+            {reason, <<"can't load `harpcaller_disk_h' module">>}];
+        {error, {open, Reason}} -> % `Reason' is a string
+          [{result, error},
+            {reason, iolist_to_binary(["can't open ", File, ": ", Reason])}]
+      end;
+    undefined ->
+      [{result, ok}]
+  end;
+
 %%----------------------------------------------------------
 
 handle_command(_Command, _Args) ->
@@ -160,7 +178,9 @@ format_request(dist_stop) ->
   [{command, dist_stop}];
 
 format_request({prune_jobs, Days}) when is_integer(Days), Days > 0 ->
-  [{command, prune_jobs}, {max_age, Days * 24 * 3600}].
+  [{command, prune_jobs}, {max_age, Days * 24 * 3600}];
+format_request(reopen_logs) ->
+  [{command, reopen_logs}].
 
 parse_reply([{<<"result">>, <<"ok">>}] = _Reply, _Request) ->
   ok;
@@ -287,6 +307,30 @@ format_address({A,B,C,D} = _Address) ->
   iolist_to_binary(io_lib:format("~B.~B.~B.~B", [A,B,C,D]));
 format_address(Address) when is_list(Address) ->
   list_to_binary(Address).
+
+%%%---------------------------------------------------------------------------
+
+-spec reopen_error_logger_file(file:filename()) ->
+  ok | {error, bad_logger_module | {open, string()}}.
+
+reopen_error_logger_file(File) ->
+  case gen_event:call(error_logger, harpcaller_disk_h, reopen) of
+    ok ->
+      ok;
+    {error, bad_module} ->
+      % possibly removed in previous attempt to reopen the log file
+      case error_logger:add_report_handler(harpcaller_disk_h, [File]) of
+        ok ->
+          ok;
+        {error, Reason} ->
+          {error, {open, harpcaller_disk_h:format_error(Reason)}};
+        {'EXIT', _Reason} ->
+          % missing module? should not happen
+          {error, bad_logger_module}
+      end;
+    {error, Reason} ->
+      {error, {open, harpcaller_disk_h:format_error(Reason)}}
+  end.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

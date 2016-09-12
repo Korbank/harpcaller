@@ -42,6 +42,7 @@ Log handling/rotation (:ref:`ref <harpcaller-logs>`):
 .. code-block:: none
 
     harpcallerd [options] prune-jobs
+    harpcallerd [options] reopen-logs
 
 
 Commands
@@ -263,6 +264,13 @@ Log handling/rotation
    This command is mainly intended to work under :manpage:`cron(8)` or
    :manpage:`logrotate(8)`.
 
+.. program:: harpcallerd reopen-logs
+
+``harpcallerd reopen-logs``
+   Close ``erlang.log_file`` and reopen it. No-op if the option was not set.
+
+   This command is mainly intended for :manpage:`logrotate(8)`.
+
 
 Configuration
 =============
@@ -302,7 +310,7 @@ First, example config:
     name_type = "longnames"
     #cookie_file = "/etc/harpcaller/cookie.txt"
     distributed_immediate = false
-    error_logger_handlers = []
+    #log_file = "/var/log/harpcaller/erlang.log"
 
 .. ** Vim's syntax sucks in code blocks with asterisk
 
