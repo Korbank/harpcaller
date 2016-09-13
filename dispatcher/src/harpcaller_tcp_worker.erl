@@ -12,6 +12,9 @@
 
 -behaviour(gen_server).
 
+%% public interface
+-export([take_over/1]).
+
 %% supervision tree API
 -export([start/1, start_link/1]).
 
@@ -54,6 +57,30 @@
   | {read_stream, harpcaller:job_id(), recent, non_neg_integer()}.
 
 %%% }}}
+%%%---------------------------------------------------------------------------
+%%% public interface
+%%%---------------------------------------------------------------------------
+
+%% @doc Spawn a worker process, taking over a client socket.
+%%
+%%   The caller must be the controlling process of the `Socket'.
+%%
+%%   In case of spawning error, the socket is closed. In any case, caller
+%%   shouldn't bother with the socket anymore.
+
+-spec take_over(gen_tcp:socket()) ->
+  {ok, pid()} | {error, term()}.
+
+take_over(Socket) ->
+  case harpcaller_tcp_worker_sup:spawn_worker(Socket) of
+    {ok, Pid} ->
+      ok = gen_tcp:controlling_process(Socket, Pid),
+      {ok, Pid};
+    {error, Reason} ->
+      gen_tcp:close(Socket),
+      {error, Reason}
+  end.
+
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
 %%%---------------------------------------------------------------------------

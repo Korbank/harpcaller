@@ -102,17 +102,7 @@ handle_cast(_Request, State) ->
 handle_info(timeout = _Message, State = #state{socket = Socket}) ->
   case gen_tcp:accept(Socket, ?ACCEPT_INTERVAL) of
     {ok, Client} ->
-      % when could a valid socket render an error?
-      {ok, {PeerAddr, PeerPort}} = inet:peername(Client),
-      harpcaller_log:info("new connection", [
-        {client_address, {str, format_address(PeerAddr)}},
-        {client_port, PeerPort}
-      ]),
-      {ok, Pid} = harpcaller_tcp_worker_sup:spawn_worker(Client),
-      case gen_tcp:controlling_process(Client, Pid) of
-        ok -> ok;
-        {error, _Reason} -> gen_tcp:close(Client)
-      end,
+      harpcaller_tcp_worker:take_over(Client),
       {noreply, State, 0};
     {error, timeout} ->
       {noreply, State, 0};
