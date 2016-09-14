@@ -111,8 +111,10 @@ init([Socket] = _Args) ->
   % XXX: we can't read the request here, as parent supervisor waits init() to
   % return
   {ok, {PeerAddr, PeerPort}} = inet:peername(Socket),
+  {ok, {LocalAddr, LocalPort}} = inet:sockname(Socket),
   harpcaller_log:set_context(connection, [
-    {client, {str, format_address(PeerAddr, PeerPort)}}
+    {client, {str, format_address(PeerAddr, PeerPort)}},
+    {local_address, {str, format_address(LocalAddr, LocalPort)}}
   ]),
   harpcaller_log:info("new connection"),
   inet:setopts(Socket, [binary, {packet, line}, {active, false}]),
@@ -155,7 +157,8 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       put('$worker_function', call),
       harpcaller_log:info("call request", [
         {host, Host}, {procedure, Proc}, {procedure_arguments, Args},
-        {timeout, Timeout}, {max_exec_time, MaxExecTime},
+        {timeout, undef_null(Timeout)},
+        {max_exec_time, undef_null(MaxExecTime)},
         {queue, queue_log_info(Queue)}
       ]),
       Options = case {Timeout, MaxExecTime} of
@@ -465,9 +468,6 @@ job_status(JobID) ->
       {error, iolist_to_binary(io_lib:format("~1024p", [Reason]))}
   end.
 
-undef_null(undefined = _Value) -> null;
-undef_null(Value) -> Value.
-
 %%%---------------------------------------------------------------------------
 
 -spec format_address(inet:ip_address(), inet:port_number()) ->
@@ -482,6 +482,9 @@ format_address({A,B,C,D} = _Address, Port) ->
     integer_to_list(D)
   ],
   string:join(OctetList, ".") ++ ":" ++ integer_to_list(Port).
+
+undef_null(undefined = _Value) -> null;
+undef_null(Value) -> Value.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
