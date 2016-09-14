@@ -49,7 +49,7 @@ install:
 	cp ebin/*.app ebin/*.beam $(DESTDIR)$(ERL_APP_DIR)/ebin
 	mkdir -p $(DESTDIR)/usr/sbin
 	mkdir -p $(DESTDIR)/etc/harpcaller
-	sed 's:^%%!.*:%%! -args_file $(ESCRIPT_ARGS_FILE):' bin/harpcallerd > $(DESTDIR)/usr/sbin/harpcallerd
+	sed 's:^%%!.*:%%! -noinput -kernel error_logger silent -args_file $(ESCRIPT_ARGS_FILE):' bin/harpcallerd > $(DESTDIR)/usr/sbin/harpcallerd
 	chmod 755 $(DESTDIR)/usr/sbin/harpcallerd
 	install -m 644 examples/harpcaller.toml $(DESTDIR)/etc/harpcaller/harpcaller.toml.example
 	touch $(DESTDIR)$(ESCRIPT_ARGS_FILE)
