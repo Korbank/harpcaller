@@ -4,21 +4,13 @@ time:
 == job result storage and retention ==
 
   * listing recorded jobs (including terminated ones)
-  * purging old jobs records
-  * logrotate script
   * timestamps in stream logs
 
 == communication with dispatcher ==
 
-  * job info request (called host, procedure, args, submitted/started/ended
-    time, ...)
   * SSL listening sockets
   * client authentication
   * add "enqueued" to possible returned values ("get_result", "read_stream")
-  * list queues (administrative command, similar in intent to "cancel queue",
-    i.e. executed on best effort basis)
-  * list queue content (user command, similar in intent to "call", i.e. atomic
-    and reliable)
   * job deduplication mechanism
     * "call this function, but not if last call was less than 10 minutes ago"
     * similar to queues: dedup key (~queue name) and dedup parameters
@@ -29,7 +21,6 @@ time:
 
 == code internals ==
 
-  * untangle job ID in harpcaller_caller:call()
   * harpcaller_caller and harpcaller_tcp_return_{result,stream}: refactoring
   * tcp_worker: list of modules
     * list all used modules, or
