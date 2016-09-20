@@ -322,7 +322,7 @@ setup_logging(Config, Options) ->
   case proplists:get_value(<<"log_file">>, ErlangConfig) of
     File when is_binary(File) ->
       % XXX: see also `harpcaller_command_handler:handle_command()'
-      ok = indira_app:set_option(indira, error_logger_file, File),
+      ok = indira_app:set_option(harpcaller, error_logger_file, File),
       case error_logger:add_report_handler(harpcaller_disk_h, [File]) of
         ok -> ok;
         {error, Reason} -> {error, {log_file, Reason}};
