@@ -235,20 +235,20 @@ handle_info({'DOWN', MonRef, process, Pid, _Info} = _Message, State) ->
       Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
       RunningCount = delete_running(Entry, QueueName, State),
       QueuedTasks = list_queued(QueueName, State),
-      case {QueuedTasks, RunningCount} of
-        {[], _} when RunningCount > 0 ->
+      case QueuedTasks of
+        [] when RunningCount > 0 ->
           % nothing left in queue, but there's still some processes running
           harpcaller_log:info("running job stopped, nothing to run left",
                               [{pid, {term, Pid}}, {job, {str, JobID}},
                                {name, QueueName}]),
           ok;
-        {[], 0} ->
+        [] when RunningCount == 0 ->
           % nothing left in queue and this was the last running process
           harpcaller_log:info("last running job stopped, queue empty",
                               [{pid, {term, Pid}}, {job, {str, JobID}},
                                {name, QueueName}]),
           delete_queue(QueueName, State);
-        {[NextEntry = #qentry{pid = NextPid, monref = NextMonRef} | _], _} ->
+        [NextEntry = #qentry{pid = NextPid, monref = NextMonRef} | _] ->
           % still something in the queue; make it running
           {ok, NextJobID} = recall_job_id(NextPid, NextMonRef, State),
           harpcaller_log:info("running job stopped, starting another",
