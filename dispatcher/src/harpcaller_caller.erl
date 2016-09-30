@@ -330,7 +330,7 @@ handle_call(job_id = _Request, _From, State = #state{job_id = JobID}) ->
 
 %% unknown calls
 handle_call(_Request, _From, State) ->
-  {reply, {error, unknown_call}, State}.
+  {reply, {error, unknown_call}, State, 0}.
 
 %% @private
 %% @doc Handle {@link gen_server:cast/2}.
@@ -349,7 +349,7 @@ handle_cast(cancel = _Request,
 
 %% unknown casts
 handle_cast(_Request, State) ->
-  {noreply, State}.
+  {noreply, State, 0}.
 
 %% @private
 %% @doc Handle incoming messages.
@@ -444,7 +444,7 @@ handle_info(timeout = _Message,
 
 %% unknown messages
 handle_info(_Message, State) ->
-  {noreply, State}.
+  {noreply, State, 0}.
 
 %% }}}
 %%----------------------------------------------------------
