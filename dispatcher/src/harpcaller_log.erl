@@ -22,6 +22,8 @@
 -export([info/1, warn/1, err/1]).
 -export([info/2, warn/2, err/2]).
 -export([info/3, warn/3, err/3]).
+-export([unexpected_call/3, unexpected_call/2]).
+-export([unexpected_cast/2, unexpected_info/2]).
 %% event serialization
 -export([to_string/1]).
 
@@ -177,6 +179,67 @@ err(Message, EventInfo) ->
 
 err(EventType, Message, EventInfo) ->
   event(error, EventType, [{message, message(Message)} | EventInfo]).
+
+%% @doc Report an unexpected call request to {@link gen_server} process.
+%%
+%%   Report is sent to {@link error_logger} as an error report of type
+%%   `harpcaller'.
+
+-spec unexpected_call(term(), term(), module()) ->
+  ok.
+
+unexpected_call(Request, From, Module) ->
+  error_logger:error_report(harpcaller, [
+    {unexpected, call},
+    {request, Request},
+    {from, From},
+    {module, Module}
+  ]).
+
+%% @doc Report an unexpected call request to {@link gen_event} process.
+%%
+%%   Report is sent to {@link error_logger} as an error report of type
+%%   `harpcaller'.
+
+-spec unexpected_call(term(), module()) ->
+  ok.
+
+unexpected_call(Request, Module) ->
+  error_logger:error_report(harpcaller, [
+    {unexpected, call},
+    {request, Request},
+    {module, Module}
+  ]).
+
+%% @doc Report an unexpected cast request to {@link gen_server} process.
+%%
+%%   Report is sent to {@link error_logger} as an error report of type
+%%   `harpcaller'.
+
+-spec unexpected_cast(term(), module()) ->
+  ok.
+
+unexpected_cast(Request, Module) ->
+  error_logger:error_report(harpcaller, [
+    {unexpected, cast},
+    {request, Request},
+    {module, Module}
+  ]).
+
+%% @doc Report an unexpected message sent to a process.
+%%
+%%   Report is sent to {@link error_logger} as an error report of type
+%%   `harpcaller'.
+
+-spec unexpected_info(term(), module()) ->
+  ok.
+
+unexpected_info(Message, Module) ->
+  error_logger:error_report(harpcaller, [
+    {unexpected, message},
+    {message, Message},
+    {module, Module}
+  ]).
 
 %%----------------------------------------------------------
 %% logging interface helpers

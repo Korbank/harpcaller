@@ -138,14 +138,16 @@ terminate(_Arg, _State = #state{socket = Socket}) ->
 %% @doc Handle {@link gen_server:call/2}.
 
 %% unknown calls
-handle_call(_Request, _From, State) ->
+handle_call(Request, From, State) ->
+  harpcaller_log:unexpected_call(Request, From, ?MODULE),
   {reply, {error, unknown_call}, State}.
 
 %% @private
 %% @doc Handle {@link gen_server:cast/2}.
 
 %% unknown casts
-handle_cast(_Request, State) ->
+handle_cast(Request, State) ->
+  harpcaller_log:unexpected_cast(Request, ?MODULE),
   {noreply, State}.
 
 %% @private
@@ -251,7 +253,8 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
   end;
 
 %% unknown messages
-handle_info(_Message, State) ->
+handle_info(Message, State) ->
+  harpcaller_log:unexpected_info(Message, ?MODULE),
   {noreply, State}.
 
 %% }}}
