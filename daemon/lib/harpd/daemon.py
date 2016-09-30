@@ -31,9 +31,17 @@ import atexit
 import signal
 import heapq
 import errno
+import fcntl
 
 from log import message as log
 import proc
+
+#-----------------------------------------------------------------------------
+
+def close_on_exec(handle):
+    fd = handle.fileno() if hasattr(handle, 'fileno') else handle
+    flags = fcntl.fcntl(fd, fcntl.F_GETFD)
+    fcntl.fcntl(fd, fcntl.F_SETFD, flags | fcntl.FD_CLOEXEC)
 
 #-----------------------------------------------------------------------------
 # Daemon {{{
@@ -70,6 +78,7 @@ class Daemon(object):
             self.filename = os.path.abspath(filename)
             self.fh = None
             fd = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0666)
+            close_on_exec(fd)
             self.fh = os.fdopen(fd, 'w')
             self.update()
             atexit.register(self.close)
@@ -792,6 +801,7 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
             "new client connected",
             client_address = addr, client_port = port
         ))
+        close_on_exec(client_socket)
         client_socket.settimeout(self.read_timeout)
         client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         # XXX: these two are Linux specific
