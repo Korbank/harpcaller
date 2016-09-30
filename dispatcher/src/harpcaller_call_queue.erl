@@ -9,7 +9,7 @@
 -behaviour(gen_server).
 
 %% public interface
--export([enqueue/2]).
+-export([enqueue/3]).
 -export([cancel/1]).
 -export([list/0, list_processes/1]).
 
@@ -50,7 +50,8 @@
   key :: {pid(), reference()},
   q :: queue_name(),
   qref :: reference(),
-  state :: queued | running
+  state :: queued | running,
+  job_id :: harpcaller:job_id()
 }).
 
 %%% }}}
@@ -67,12 +68,15 @@
 %%   If the queue ever gets deleted ({@link cancel/1}), each enqueued process
 %%   (either waiting for its turn or already running) will receive
 %%   `{cancel, QRef}' message.
+%%
+%%   `JobID' is used for logging purposes only.
 
--spec enqueue(queue_name(), pos_integer()) ->
+-spec enqueue(harpcaller:job_id(), queue_name(), pos_integer()) ->
   reference().
 
-enqueue(QueueName, Concurrency) when is_integer(Concurrency), Concurrency > 0 ->
-  gen_server:call(?MODULE, {enqueue, self(), QueueName, Concurrency}).
+enqueue(JobID, QueueName, Concurrency)
+when is_integer(Concurrency), Concurrency > 0 ->
+  gen_server:call(?MODULE, {enqueue, self(), JobID, QueueName, Concurrency}).
 
 %% @doc Delete a queue, cancelling everything in it.
 %%
@@ -160,9 +164,10 @@ terminate(_Arg, _State = #state{q = Queue, qopts = QueueOpts,
 %% @private
 %% @doc Handle {@link gen_server:call/2}.
 
-handle_call({enqueue, Pid, QueueName, Concurrency} = _Request, _From, State) ->
+handle_call({enqueue, Pid, JobID, QueueName, Concurrency} = _Request, _From,
+            State) ->
   QRef = make_ref(),
-  MonRef = remember_process(Pid, QRef, QueueName, State),
+  MonRef = remember_process(Pid, JobID, QRef, QueueName, State),
   Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
   % create a queue if it doesn't exist already
   case create_queue(QueueName, Concurrency, State) of
@@ -175,14 +180,14 @@ handle_call({enqueue, Pid, QueueName, Concurrency} = _Request, _From, State) ->
     #qopts{running = N, concurrency = C} when N < C ->
       % queue with spare room to run a task
       harpcaller_log:info("queue has spare room, starting job",
-                          [{pid, {term, Pid}}, {name, QueueName},
-                           {running, N}, {max_running, C}]),
+                          [{pid, {term, Pid}}, {job, {str, JobID}},
+                           {name, QueueName}, {running, N}, {max_running, C}]),
       make_running(Entry, QueueName, State);
     #qopts{running = N, concurrency = C} when N >= C ->
       % queue full of running tasks
       harpcaller_log:info("queue maxed out, holding job",
-                          [{pid, {term, Pid}}, {name, QueueName},
-                           {max_running, C}]),
+                          [{pid, {term, Pid}}, {job, {str, JobID}},
+                           {name, QueueName}, {max_running, C}]),
       add_queued(Entry, QueueName, State)
   end,
   {reply, QRef, State};
@@ -226,7 +231,7 @@ handle_info({'DOWN', MonRef, process, Pid, _Info} = _Message, State) ->
     none ->
       % it wasn't a process monitored because of queue
       ignore;
-    {QRef, QueueName, running} ->
+    {JobID, QRef, QueueName, running} ->
       Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
       RunningCount = delete_running(Entry, QueueName, State),
       QueuedTasks = list_queued(QueueName, State),
@@ -234,26 +239,32 @@ handle_info({'DOWN', MonRef, process, Pid, _Info} = _Message, State) ->
         {[], _} when RunningCount > 0 ->
           % nothing left in queue, but there's still some processes running
           harpcaller_log:info("running job stopped, nothing to run left",
-                              [{pid, {term, Pid}}, {name, QueueName}]),
+                              [{pid, {term, Pid}}, {job, {str, JobID}},
+                               {name, QueueName}]),
           ok;
         {[], 0} ->
           % nothing left in queue and this was the last running process
           harpcaller_log:info("last running job stopped, queue empty",
-                              [{pid, {term, Pid}}, {name, QueueName}]),
+                              [{pid, {term, Pid}}, {job, {str, JobID}},
+                               {name, QueueName}]),
           delete_queue(QueueName, State);
-        {[NextEntry = #qentry{pid = NextPid} | _], _} ->
+        {[NextEntry = #qentry{pid = NextPid, monref = NextMonRef} | _], _} ->
           % still something in the queue; make it running
+          {ok, NextJobID} = recall_job_id(NextPid, NextMonRef, State),
           harpcaller_log:info("running job stopped, starting another",
-                              [{pid, {term, Pid}}, {next_pid, {term, NextPid}},
+                              [{pid, {term, Pid}}, {job, {str, JobID}},
+                               {next_pid, {term, NextPid}},
+                               {next_job, {str, NextJobID}},
                                {name, QueueName}]),
           make_running(NextEntry, QueueName, State)
       end;
-    {QRef, QueueName, queued} ->
+    {JobID, QRef, QueueName, queued} ->
       % NOTE: if this one is queued, it means the queue was full, so don't
       % delete it (the queue) just yet
       Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
       harpcaller_log:info("waiting job stopped",
-                          [{pid, {term, Pid}}, {name, QueueName}]),
+                          [{pid, {term, Pid}}, {job, {str, JobID}},
+                           {name, QueueName}]),
       delete_queued(Entry, QueueName, State),
       ok
   end,
@@ -428,17 +439,19 @@ make_running(Entry = #qentry{pid = Pid, monref = MonRef, qref = QRef},
 %%   Simply calling it as a first thing on every arriving enqueueing request
 %%   should be enough.
 
--spec remember_process(pid(), reference(), queue_name(), #state{}) ->
+-spec remember_process(pid(), harpcaller:job_id(),
+                       reference(), queue_name(), #state{}) ->
   reference().
 
-remember_process(Pid, QRef, QueueName,
+remember_process(Pid, JobID, QRef, QueueName,
                  _State = #state{qpids = QueuePids}) ->
   MonRef = monitor(process, Pid),
   ets:insert(QueuePids, #qpid{
     key = {Pid, MonRef},
     q = QueueName,
     qref = QRef,
-    state = queued % will be updated by `make_running()'
+    state = queued, % will be updated by `make_running()'
+    job_id = JobID
   }),
   MonRef.
 
@@ -461,18 +474,30 @@ update_process_state(Pid, MonRef, NewProcState,
 %%   is returned.
 
 -spec recall_process(pid(), reference(), #state{}) ->
-  {QRef :: reference(), queue_name(), running | queued} | none.
+    {harpcaller:job_id(), QRef :: reference(), queue_name(), running | queued}
+  | none.
 
 recall_process(Pid, MonRef, _State = #state{qpids = QueuePids}) ->
   case ets:lookup(QueuePids, {Pid, MonRef}) of
     [] ->
       none;
-    [#qpid{qref = QRef, q = QueueName, state = running}] ->
+    [#qpid{qref = QRef, q = QueueName, state = running, job_id = JobID}] ->
       ets:delete(QueuePids, {Pid, MonRef}), % it will no longer be necessary
-      {QRef, QueueName, running};
-    [#qpid{qref = QRef, q = QueueName, state = queued}] ->
+      {JobID, QRef, QueueName, running};
+    [#qpid{qref = QRef, q = QueueName, state = queued, job_id = JobID}] ->
       ets:delete(QueuePids, {Pid, MonRef}), % it will no longer be necessary
-      {QRef, QueueName, queued}
+      {JobID, QRef, QueueName, queued}
+  end.
+
+%% @doc Retrieve job ID for specified enqueued process.
+
+-spec recall_job_id(pid(), reference(), #state{}) ->
+  {ok, harpcaller:job_id()} | none.
+
+recall_job_id(Pid, MonRef, _State = #state{qpids = QueuePids}) ->
+  case ets:lookup(QueuePids, {Pid, MonRef}) of
+    [#qpid{job_id = JobID}] -> {ok, JobID};
+    [] -> none
   end.
 
 %%% }}}

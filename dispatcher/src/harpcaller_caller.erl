@@ -311,7 +311,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
         {QueueName, Concurrency} ->
           % enqueue and wait for a message
           harpcaller_log:info("waiting for a queue", [{queue, QueueName}]),
-          QRef = harpcaller_call_queue:enqueue(QueueName, Concurrency),
+          QRef = harpcaller_call_queue:enqueue(JobID, QueueName, Concurrency),
           NewState = FilledState#state{
             call = {queued, QRef}
           },
