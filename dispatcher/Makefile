@@ -12,6 +12,12 @@ DIALYZER_OPTS = --no_check_plt $(if $(DIALYZER_PLT),--plts $(DIALYZER_PLT))
 DIAGRAMS = $(basename $(notdir $(wildcard diagrams/*.diag)))
 DIAGRAMS_SVG = $(foreach D,$(DIAGRAMS),doc/images/$D.svg)
 
+ERL_APP_FILE = $(wildcard ebin/*.app)
+ERL_APP_NAME = $(patsubst ebin/%.app,%,$(ERL_APP_FILE))
+ERL_APP_VER = $(shell _install/app_version $(ERL_APP_FILE))
+ERL_INSTALL_PATH = $(shell _install/lib_dir)
+ESCRIPT_ARGS_FILE = /etc/harpcaller/erlang.args
+
 #-----------------------------------------------------------------------------
 
 .PHONY: all doc edoc diagrams compile build clean dialyzer
@@ -39,16 +45,11 @@ dialyzer:
 #-----------------------------------------------------------------------------
 
 .PHONY: install
-install: ERL_APP_NAME = $(patsubst ebin/%.app,%,$(wildcard ebin/*.app))
-install: ERL_APP_VERSION = $(subst v,,$(word 1,$(subst -, ,$(shell cat version))))
-install: ERL_LIBS_DIR = $(shell erl -noshell -eval 'io:put_chars([code:lib_dir(), "\n"]), halt()')
-install: ERL_APP_DIR = $(ERL_LIBS_DIR)/$(ERL_APP_NAME)-$(ERL_APP_VERSION)
-install: ESCRIPT_ARGS_FILE = /etc/harpcaller/erlang.args
 install:
-	mkdir -p $(DESTDIR)$(ERL_APP_DIR)/ebin
-	cp ebin/*.app ebin/*.beam $(DESTDIR)$(ERL_APP_DIR)/ebin
 	mkdir -p $(DESTDIR)/usr/sbin
 	mkdir -p $(DESTDIR)/etc/harpcaller
+	mkdir -p $(DESTDIR)$(ERL_INSTALL_PATH)/$(ERL_APP_NAME)-$(ERL_APP_VER)/ebin
+	install -m 644 ebin/*.app ebin/*.beam $(DESTDIR)$(ERL_INSTALL_PATH)/$(ERL_APP_NAME)-$(ERL_APP_VER)/ebin
 	sed 's:^%%!.*:%%! -noinput -kernel error_logger silent -args_file $(ESCRIPT_ARGS_FILE):' bin/harpcallerd > $(DESTDIR)/usr/sbin/harpcallerd
 	chmod 755 $(DESTDIR)/usr/sbin/harpcallerd
 	install -m 644 examples/harpcaller.toml $(DESTDIR)/etc/harpcaller/harpcaller.toml.example

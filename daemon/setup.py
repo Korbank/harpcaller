@@ -3,11 +3,9 @@
 from setuptools import setup, find_packages
 from glob import glob
 
-version = open("version").readline().strip().replace("v", "")
-
 setup(
     name = "harpd",
-    version = version,
+    version = "0.4.1",
     description = "HarpRPC daemon",
     scripts     = glob("bin/*"),
     packages    = find_packages("lib"),

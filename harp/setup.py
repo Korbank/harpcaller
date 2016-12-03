@@ -2,11 +2,9 @@
 
 from setuptools import setup, find_packages
 
-version = open("version").readline().strip().replace("v", "")
-
 setup(
     name = "harp",
-    version = version,
+    version = "0.4.1",
     description = "HarpCaller client",
     packages    = find_packages("lib"),
     package_dir = { "": "lib" },

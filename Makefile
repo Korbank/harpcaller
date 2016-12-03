@@ -13,7 +13,6 @@ default: help
 help:
 	echo "Available targets:"
 	echo "  help"
-	echo "  version"
 	echo "  all"
 	echo "  install DESTDIR=..."
 	echo "  clean"
@@ -31,10 +30,6 @@ all: harp daemon dispatcher doc
 install: harp-install daemon-install dispatcher-install doc-install
 clean: harp-clean daemon-clean dispatcher-clean doc-clean
 
-harp: harp/version
-daemon: daemon/version
-dispatcher: dispatcher/version
-
 harp daemon dispatcher:
 	$(MAKE) all -C $@
 
@@ -43,12 +38,6 @@ harp-install daemon-install dispatcher-install:
 
 harp-clean daemon-clean dispatcher-clean:
 	$(MAKE) clean -C $(patsubst %-clean,%,$@)
-
-harp/version daemon/version dispatcher/version:
-	(git describe --long --dirty --match='v*' --abbrev=10 --tags 2> /dev/null || echo devel) > $@
-
-.PHONY: version
-version: harp/version daemon/version dispatcher/version
 
 #-----------------------------------------------------------------------------
 

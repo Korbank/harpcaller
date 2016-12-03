@@ -13,9 +13,3 @@ install:
 clean:
 	python setup.py clean --all
 	rm -rf lib/*.egg-info
-
-# file used by debian/rules to override $(VERSION) variable (in case of
-# building from source package instead of from git repository)
-.PHONY: version
-version:
-	(git describe --long --dirty --match='v*' --abbrev=10 --tags 2> /dev/null || echo devel) > $@
