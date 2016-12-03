@@ -323,10 +323,9 @@ setup_logging(Config, Options) ->
     File when is_binary(File) ->
       % XXX: see also `harpcaller_command_handler:handle_command()'
       ok = indira_app:set_option(harpcaller, error_logger_file, File),
-      case error_logger:add_report_handler(harpcaller_disk_h, [File]) of
+      case indira_disk_h:install(error_logger, File) of
         ok -> ok;
-        {error, Reason} -> {error, {log_file, Reason}};
-        {'EXIT', _Reason} -> {error, bad_logger_module}
+        {error, Reason} -> {error, {log_file, Reason}}
       end;
     undefined ->
       ok;
@@ -656,10 +655,8 @@ format_error(no_listen_addresses) ->
 %% indira_options() and setup_logging()
 format_error(invalid_option_format) ->
   "invalid config option in [erlang] section";
-format_error(bad_logger_module) ->
-  "can't load `harpcaller_disk_h' module";
 format_error({log_file, Reason}) ->
-  ["log writing error: ", file:format_error(Reason)];
+  ["log writing error: ", indira_disk_h:format_error(Reason)];
 
 %% options to indira_app:daemonize() are guaranteed to be of proper format
 
