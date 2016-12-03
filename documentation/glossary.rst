@@ -4,20 +4,48 @@ Glossary
 
 **TODO**
 
-* call dispatcher (harpcaller)
-* daemon
-* client library
-* queue
+.. glossary::
 
-  * concurrency level
+    call dispatcher
+        harpcallerd
 
-* RPC call
-* job
+    daemon
+        harpd
 
-  * identifier
-  * result
-  * stream result
-  * returned result
-  * error
-  * exception
+    client library
+        harp
+
+    queue
+        TODO
+
+    .. glossary::
+
+        concurrency level
+            TODO
+
+    RPC call
+        TODO
+
+    job
+        TODO
+
+    .. glossary::
+
+        identifier
+            TODO
+
+        result
+            TODO
+
+        stream result
+            TODO
+
+        returned result
+            TODO
+
+        error
+            TODO
+
+        exception
+            TODO
 
