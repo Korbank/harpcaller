@@ -32,6 +32,7 @@ import signal
 import heapq
 import errno
 import fcntl
+import traceback
 
 from log import message as log
 import proc
@@ -42,6 +43,12 @@ def close_on_exec(handle):
     fd = handle.fileno() if hasattr(handle, 'fileno') else handle
     flags = fcntl.fcntl(fd, fcntl.F_GETFD)
     fcntl.fcntl(fd, fcntl.F_SETFD, flags | fcntl.FD_CLOEXEC)
+
+def exception_logger(logger, exctype, value, tb):
+    for chunk in traceback.format_exception(exctype, value, tb):
+        # `chunk' is guaranteed to end with newline
+        for line in chunk[0:-1].split("\n"):
+            logger.critical(line)
 
 #-----------------------------------------------------------------------------
 # Daemon {{{
@@ -303,7 +310,13 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         '''
         Prepare request handler instance for work.
         '''
-        pass
+        # NOTE: this shouldn't be necessary, as BaseRequestHandler tries to
+        # catch all the exceptions, but all the pieces are in place already,
+        # so it's cheap to have it as well
+        def excepthook(exctype, value, tb):
+            logger = logging.getLogger("harpd.daemon.handle_client")
+            exception_logger(logger, exctype, value, tb)
+        sys.excepthook = excepthook
 
     def handle(self):
         '''
@@ -733,6 +746,13 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         # necessary to detect if this is the child or parent process, so child
         # won't forward signal to its older siblings
         self.parent_pid = os.getpid()
+
+        # hook for logging all the uncaught exceptions, so bugs don't cause
+        # harpd to die without a trace
+        def excepthook(exctype, value, tb):
+            logger = logging.getLogger("harpd.daemon.server")
+            exception_logger(logger, exctype, value, tb)
+        sys.excepthook = excepthook
 
         # queue and communication channel for children that want an execution
         # timeout
