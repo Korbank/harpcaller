@@ -1,6 +1,10 @@
 %%%---------------------------------------------------------------------------
 %%% @doc
-%%%   Administrative command handler for Indira.
+%%%   Module that handles command line operations.
+%%%   This includes parsing provided arguments and either starting the daemon
+%%%   or sending it various administrative commands.
+%%%
+%%% @see harpcaller_command_handler
 %%% @end
 %%%---------------------------------------------------------------------------
 
@@ -8,30 +12,40 @@
 
 -behaviour(gen_indira_cli).
 
+%% interface for daemonizing script
+-export([format_error/1]).
+-export([help/1]).
+
 %% gen_indira_cli callbacks
 -export([parse_arguments/2]).
 -export([handle_command/2, format_request/2, handle_reply/3]).
 
--export([help/1]).
--export([format_error/1]).
-
 %%%---------------------------------------------------------------------------
+%%% types {{{
 
+-define(ADMIN_COMMAND_MODULE, harpcaller_command_handler).
+% XXX: `status' and `stop' commands are bound to few specific errors this
+% module returns; this can't be easily moved to a config/option
 -define(ADMIN_SOCKET_TYPE, indira_unix).
 
--record(cmd, {
-  op :: start | stop | status | reload_config
-        | list_jobs | {cancel_job, string() | undefined}
-        | {job_info, string() | undefined}
-        | list_hosts | refresh_hosts
-        | list_queues | {list_queue, harpcaller_call_queue:queue_name()}
-        | {cancel_queue, harpcaller_call_queue:queue_name() | undefined}
-        | dist_start | dist_stop
-        | prune_jobs | reopen_logs,
-  socket :: file:filename(),
+-type config_value() :: binary() | number() | boolean().
+-type config_key() :: binary().
+-type config() :: [{config_key(), config_value() | config()}].
+
+-record(opts, {
+  op :: start | status | stop | reload_config
+      | list_jobs | {cancel_job, string() | undefined}
+      | {job_info, string() | undefined}
+      | list_hosts | refresh_hosts
+      | list_queues | {list_queue, harpcaller_call_queue:queue_name()}
+      | {cancel_queue, harpcaller_call_queue:queue_name() | undefined}
+      | dist_start | dist_stop
+      | prune_jobs | reopen_logs,
+  admin_socket :: file:filename(),
   options :: [{atom(), term()}]
 }).
 
+%%% }}}
 %%%---------------------------------------------------------------------------
 %%% gen_indira_cli callbacks
 %%%---------------------------------------------------------------------------
@@ -39,109 +53,112 @@
 %%----------------------------------------------------------
 %% parse_arguments() {{{
 
-parse_arguments(Args, [DefAdminSocket, DefConfigFile] = _DefaultValues) ->
-  EmptyCommand = #cmd{
-    socket = DefAdminSocket,
+%% @private
+%% @doc Parse command line arguments and decode opeartion from them.
+
+parse_arguments(Args, [DefAdminSocket, DefConfig] = _Defaults) ->
+  EmptyOptions = #opts{
+    admin_socket = DefAdminSocket,
     options = [
-      {config, DefConfigFile},
+      {config, DefConfig},
       {age, 30} % default age for pruning stream logs
     ]
   },
-  case indira_cli:folds(fun cli_opt/2, EmptyCommand, Args) of
-    {ok, Command = #cmd{op = start}} ->
-      {ok, start, Command};
-    {ok, Command = #cmd{op = stop}} ->
-      {ok, stop, Command};
-    {ok, Command = #cmd{op = status}} ->
-      {ok, status, Command};
+  case indira_cli:folds(fun cli_opt/2, EmptyOptions, Args) of
+    {ok, Options = #opts{op = start }} -> {ok, start,  Options};
+    {ok, Options = #opts{op = status}} -> {ok, status, Options};
+    {ok, Options = #opts{op = stop  }} -> {ok, stop,   Options};
 
-    {ok, _Command = #cmd{op = {cancel_job, undefined} }} ->
+    {ok, _Options = #opts{op = {cancel_job, undefined} }} ->
       {error, undefined_job};
-    {ok, _Command = #cmd{op = {job_info, undefined} }} ->
+    {ok, _Options = #opts{op = {job_info, undefined} }} ->
       {error, undefined_job};
-    {ok, _Command = #cmd{op = {cancel_queue, undefined} }} ->
+    {ok, _Options = #opts{op = {cancel_queue, undefined} }} ->
       {error, undefined_queue};
 
-    {ok, _Command = #cmd{op = undefined}} ->
+    {ok, _Options = #opts{op = undefined}} ->
       help;
 
-    {ok, Command = #cmd{op = Op, socket = Socket}} ->
-      {send, {indira_unix, Socket}, Op, Command};
+    {ok, Options = #opts{op = Command, admin_socket = AdminSocket}} ->
+      {send, {?ADMIN_SOCKET_TYPE, AdminSocket}, Command, Options};
 
     {error, {help, _Arg}} ->
       help;
 
-    {error, Reason} ->
-      {error, Reason}
+    {error, {Reason, Arg}} ->
+      {error, {Reason, Arg}}
   end.
 
 %% }}}
 %%----------------------------------------------------------
 %% handle_command() {{{
 
-handle_command(start = _Op,
-               _Command = #cmd{socket = Socket, options = Options}) ->
-  ConfigFile = proplists:get_value(config, Options),
-  case load_config_file(ConfigFile) of
+%% @private
+%% @doc Execute commands more complex than "request -> reply -> print".
+
+handle_command(start = _Command,
+               Options = #opts{admin_socket = Socket, options = CLIOpts}) ->
+  ConfigFile = proplists:get_value(config, CLIOpts),
+  case read_config_file(ConfigFile) of
     {ok, Config} ->
       case setup_applications(Config, Options) of
         {ok, IndiraOptions} ->
           indira_app:daemonize(harpcaller, [
-            {listen, [{indira_unix, Socket}]},
-            {command, {harpcaller_command_handler, []}} |
+            {listen, [{?ADMIN_SOCKET_TYPE, Socket}]},
+            {command, {?ADMIN_COMMAND_MODULE, []}} |
             IndiraOptions
           ]);
         {error, Reason} ->
-          {error, Reason}
+          {error, {configure, Reason}}
       end;
     {error, Reason} ->
+      % Reason :: {config_format | config_read, term()}
       {error, Reason}
   end;
 
-handle_command(stop = Op,
-               Command = #cmd{socket = Socket, options = Options}) ->
-  {ok, Request} = format_request(Op, Command),
-  Timeout = proplists:get_value(timeout, Options, infinity),
-  SendOpts = [{timeout, Timeout}],
-  case indira_cli:send_one_command(indira_unix, Socket, Request, SendOpts) of
+handle_command(status = Command,
+               Options = #opts{admin_socket = Socket, options = CLIOpts}) ->
+  Timeout = proplists:get_value(timeout, CLIOpts, infinity),
+  Opts = case proplists:get_bool(wait, CLIOpts) of
+    true  = Wait -> [{timeout, Timeout}, retry];
+    false = Wait -> [{timeout, Timeout}]
+  end,
+  {ok, Request} = format_request(Command, Options),
+  case indira_cli:send_one_command(?ADMIN_SOCKET_TYPE, Socket, Request, Opts) of
     {ok, Reply} ->
-      handle_reply(Reply, Op, Command);
+      handle_reply(Reply, Command, Options);
+    {error, timeout} when Wait ->
+      % FIXME: can be either timeout on connect or timeout on receiving a reply
+      Reply = ?ADMIN_COMMAND_MODULE:hardcoded_reply(daemon_stopped),
+      handle_reply(Reply, Command, Options);
     {error, econnrefused} -> % NOTE: specific to `indira_unix' sockets
-      Reply = harpcaller_command_handler:hardcoded_reply(ok),
-      handle_reply(Reply, Op, Command);
+      Reply = ?ADMIN_COMMAND_MODULE:hardcoded_reply(daemon_stopped),
+      handle_reply(Reply, Command, Options);
     {error, enoent} -> % NOTE: specific to `indira_unix' sockets
-      Reply = harpcaller_command_handler:hardcoded_reply(ok),
-      handle_reply(Reply, Op, Command);
-    {error, closed} ->
-      % in the unlikely case of Erlang VM shutting down before allowing reply
-      % to pass through
-      Reply = harpcaller_command_handler:hardcoded_reply(ok),
-      handle_reply(Reply, Op, Command);
+      Reply = ?ADMIN_COMMAND_MODULE:hardcoded_reply(daemon_stopped),
+      handle_reply(Reply, Command, Options);
     {error, Reason} ->
       {error, {send, Reason}} % mimic what `indira_cli:execute()' returns
   end;
 
-handle_command(status = Op,
-               Command = #cmd{socket = Socket, options = Options}) ->
-  {ok, Request} = format_request(Op, Command),
-  Timeout = proplists:get_value(timeout, Options, infinity),
-  SendOpts = case proplists:get_bool(wait, Options) of
-    true  = Wait -> [{timeout, Timeout}, retry];
-    false = Wait -> [{timeout, Timeout}]
-  end,
-  case indira_cli:send_one_command(indira_unix, Socket, Request, SendOpts) of
+handle_command(stop = Command,
+               Options = #opts{admin_socket = Socket, options = CLIOpts}) ->
+  Timeout = proplists:get_value(timeout, CLIOpts, infinity),
+  Opts = [{timeout, Timeout}],
+  {ok, Request} = format_request(Command, Options),
+  case indira_cli:send_one_command(?ADMIN_SOCKET_TYPE, Socket, Request, Opts) of
     {ok, Reply} ->
-      handle_reply(Reply, Op, Command);
-    {error, timeout} when Wait ->
-      % FIXME: can be either timeout on connect or timeout on receiving a reply
-      Reply = harpcaller_command_handler:hardcoded_reply(status_stopped),
-      handle_reply(Reply, Op, Command);
+      handle_reply(Reply, Command, Options);
+    {error, closed} ->
+      % AF_UNIX socket exists, but nothing listens there (stale socket)
+      Reply = ?ADMIN_COMMAND_MODULE:hardcoded_reply(generic_ok),
+      handle_reply(Reply, Command, Options);
     {error, econnrefused} -> % NOTE: specific to `indira_unix' sockets
-      Reply = harpcaller_command_handler:hardcoded_reply(status_stopped),
-      handle_reply(Reply, Op, Command);
+      Reply = ?ADMIN_COMMAND_MODULE:hardcoded_reply(generic_ok),
+      handle_reply(Reply, Command, Options);
     {error, enoent} -> % NOTE: specific to `indira_unix' sockets
-      Reply = harpcaller_command_handler:hardcoded_reply(status_stopped),
-      handle_reply(Reply, Op, Command);
+      Reply = ?ADMIN_COMMAND_MODULE:hardcoded_reply(generic_ok),
+      handle_reply(Reply, Command, Options);
     {error, Reason} ->
       {error, {send, Reason}} % mimic what `indira_cli:execute()' returns
   end.
@@ -150,98 +167,233 @@ handle_command(status = Op,
 %%----------------------------------------------------------
 %% format_request() + handle_reply() {{{
 
-format_request(status = _Op, _Command = #cmd{options = Options}) ->
-  Request = case proplists:get_bool(wait, Options) of
-    true  -> harpcaller_command_handler:format_request(status_wait);
-    false -> harpcaller_command_handler:format_request(status)
+%% @private
+%% @doc Format a request to send to daemon.
+
+format_request(status = _Command, _Options = #opts{options = CLIOpts}) ->
+  Request = case proplists:get_bool(wait, CLIOpts) of
+    true  -> ?ADMIN_COMMAND_MODULE:format_request(status_wait);
+    false -> ?ADMIN_COMMAND_MODULE:format_request(status)
   end,
   {ok, Request};
-format_request(prune_jobs = _Op, _Command = #cmd{options = Options}) ->
-  Age = proplists:get_value(age, Options),
-  Request = harpcaller_command_handler:format_request({prune_jobs, Age}),
+format_request(prune_jobs = _Command, _Options = #opts{options = CLIOpts}) ->
+  Age = proplists:get_value(age, CLIOpts),
+  Request = ?ADMIN_COMMAND_MODULE:format_request({prune_jobs, Age}),
   {ok, Request};
-format_request(Op, _Command) ->
-  Request = harpcaller_command_handler:format_request(Op),
+format_request(Command, _Options) ->
+  Request = ?ADMIN_COMMAND_MODULE:format_request(Command),
   {ok, Request}.
 
-handle_reply(Reply, stop = Op, _Command = #cmd{options = Options}) ->
-  PrintPid = proplists:get_bool(print_pid, Options),
-  case harpcaller_command_handler:parse_reply(Reply, Op) of
-    {ok, Pid} when PrintPid -> io:fwrite("~s~n", [Pid]), ok;
+%% @private
+%% @doc Handle a reply to a command sent to daemon.
+
+handle_reply(Reply, status = Command, _Options) ->
+  % `status' and `status_wait' have the same `Command' and replies
+  case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
+    running ->
+      println("harpcallerd is running"),
+      ok;
+    stopped ->
+      println("harpcallerd is stopped"),
+      {error, 1};
+    % for future changes in status detection
+    Status ->
+      {error, {unknown_status, Status}}
+  end;
+
+handle_reply(Reply, stop = Command, _Options = #opts{options = CLIOpts}) ->
+  PrintPid = proplists:get_bool(print_pid, CLIOpts),
+  case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
+    {ok, Pid} when PrintPid -> println(Pid), ok;
     {ok, _Pid} when not PrintPid -> ok;
     ok -> ok;
     {error, Reason} -> {error, Reason}
   end;
 
-handle_reply(Reply, status = Op, _Command) ->
-  % `status' and `status_wait' have the same `Op' and replies
-  case harpcaller_command_handler:parse_reply(Reply, Op) of
-    {ok, <<"running">> = _Status} ->
-      io:fwrite("harpcallerd is running~n"),
-      ok;
-    {ok, <<"stopped">> = _Status} ->
-      io:fwrite("harpcallerd is stopped~n"),
-      {error, 1};
-    % for future changes in status detection
-    {ok, Status} ->
-      {error, {unknown_status, Status}}
-  end;
-
-handle_reply(Reply, list_jobs = Op, _Command) ->
-  case harpcaller_command_handler:parse_reply(Reply, Op) of
+handle_reply(Reply, list_jobs = Command, _Options) ->
+  case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
     {ok, Jobs} -> lists:foreach(fun print_json/1, Jobs), ok;
     {error, Reason} -> {error, Reason}
   end;
 
-handle_reply(Reply, {job_info, _} = Op, _Command) ->
-  case harpcaller_command_handler:parse_reply(Reply, Op) of
+handle_reply(Reply, {job_info, _} = Command, _Options) ->
+  case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
     {ok, JobInfo} -> print_json(JobInfo), ok;
     {error, Reason} -> {error, Reason}
   end;
 
-handle_reply(Reply, list_hosts = Op, _Command) ->
-  case harpcaller_command_handler:parse_reply(Reply, Op) of
+handle_reply(Reply, list_hosts = Command, _Options) ->
+  case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
     {ok, Hosts} -> lists:foreach(fun print_json/1, Hosts), ok;
     {error, Reason} -> {error, Reason}
   end;
 
-handle_reply(Reply, list_queues = Op, _Command) ->
-  case harpcaller_command_handler:parse_reply(Reply, Op) of
+handle_reply(Reply, list_queues = Command, _Options) ->
+  case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
     {ok, Queues} -> lists:foreach(fun print_json/1, Queues), ok;
     {error, Reason} -> {error, Reason}
   end;
 
-handle_reply(Reply, {list_queue, _} = Op, _Command) ->
-  case harpcaller_command_handler:parse_reply(Reply, Op) of
+handle_reply(Reply, {list_queue, _} = Command, _Options) ->
+  case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
     {ok, Jobs} -> lists:foreach(fun print_json/1, Jobs), ok;
     {error, Reason} -> {error, Reason}
   end;
 
-handle_reply(Reply, Op, _Command) ->
-  case harpcaller_command_handler:parse_reply(Reply, Op) of
-    ok -> ok;
-    {error, Reason} -> {error, Reason}
-  end.
-
-print_json(Struct) ->
-  {ok, JSON} = indira_json:encode(Struct),
-  io:put_chars([JSON, $\n]).
+handle_reply(Reply, Command, _Options) ->
+  ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command).
 
 %% }}}
 %%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
-%%% setting up applications
+%%% interface for daemonizing script
 %%%---------------------------------------------------------------------------
 
--spec setup_applications([{binary(), term()}], [{atom(), term()}]) ->
-  {ok, IndiraOptions :: [{atom(), term()}]} | {error, term()}.
+%% @doc Convert an error to a printable form.
+
+-spec format_error(term()) ->
+  iolist() | binary().
+
+%% command line parsing
+format_error({arguments, {bad_command, Command}}) ->
+  ["invalid command: ", Command];
+format_error({arguments, {bad_option, Option}}) ->
+  ["invalid option: ", Option];
+format_error({arguments, {bad_timeout, _Arg}}) ->
+  "invalid timeout value";
+format_error({arguments, {bad_pruning_age, _Arg}}) ->
+  "invalid log pruning age";
+format_error({arguments, {bad_queue_name, _Arg}}) ->
+  "invalid queue name";
+format_error({arguments, undefined_queue}) ->
+  "queue name not provided";
+format_error({arguments, undefined_job}) ->
+  "job ID not provided";
+format_error({arguments, {excessive_argument, Arg}}) ->
+  ["excessive argument: ", Arg];
+
+%% config file handling (`start')
+format_error({config_read, Error}) ->
+  ["config reading error: ", file:format_error(Error)];
+format_error({config_format, Error}) ->
+  ["config file parsing error: ", format_etoml_error(Error)];
+
+%% errors from setup_applications()
+format_error({configure, {bad_option, Option}}) ->
+  ["invalid config option: ", Option];
+format_error({configure, no_listen_addresses}) ->
+  "no listen addresses in configuration";
+%% prepare_indira_options() and setup_logging()
+format_error({configure, bad_option}) ->
+  "invalid config option in [erlang] section";
+format_error({configure, {log_file, Error}}) ->
+  ["error opening log file: ", indira_disk_h:format_error(Error)];
+
+%% TODO: `indira_app:daemonize()' errors
+
+%% request sending errors
+format_error({send, bad_request_format}) ->
+  "invalid request format (programmer's error)";
+format_error({send, bad_reply_format}) ->
+  "invalid reply format (daemon's error)";
+format_error({send, timeout}) ->
+  "operation timed out";
+format_error({send, Error}) ->
+  io_lib:format("request sending error: ~1024p", [Error]);
+
+format_error({unknown_status, Status}) ->
+  io_lib:format("unknown status: ~1024p", [Status]);
+
+%% `gen_indira_cli' callback returns invalid value
+format_error({bad_return_value, Value}) ->
+  io_lib:format("invalid return value from callback: ~1024p", [Value]);
+
+format_error(Message) when is_binary(Message) ->
+  Message;
+format_error(Reason) ->
+  io_lib:format("unrecognized error: ~1024p", [Reason]).
+
+%% @doc Return a printable help message.
+
+-spec help(string()) ->
+  iolist().
+
+help(Script) ->
+  _Usage = [
+    "HarpCaller daemon.\n",
+    "\n",
+    "Daemon control:\n",
+    "  ", Script, " [--socket=...] start [--debug] [--config=...] [--pidfile=...]\n",
+    "  ", Script, " [--socket=...] status [--wait [--timeout=...]]\n",
+    "  ", Script, " [--socket=...] stop [--timeout=...] [--print-pid]\n",
+    "  ", Script, " [--socket=...] reload-config\n",
+    "Jobs:\n",
+    "  ", Script, " [--socket=...] list\n",
+    "  ", Script, " [--socket=...] info <job-id>\n",
+    "  ", Script, " [--socket=...] cancel <job-id>\n",
+    "Job queues:\n",
+    "  ", Script, " [--socket=...] queue-list\n",
+    "  ", Script, " [--socket=...] queue-list <queue-name>\n",
+    "  ", Script, " [--socket=...] queue-cancel <queue-name>\n",
+    "Hosts registry:\n",
+    "  ", Script, " [--socket=...] hosts-list\n",
+    "  ", Script, " [--socket=...] hosts-refresh\n",
+    "Distributed Erlang support:\n",
+    "  ", Script, " [--socket=...] dist-erl-start\n",
+    "  ", Script, " [--socket=...] dist-erl-stop\n",
+    "Log handling/rotation:\n",
+    "  ", Script, " [--socket=...] prune-jobs [--age=<days>]\n",
+    "  ", Script, " [--socket=...] reopen-logs\n"
+  ].
+
+%%%---------------------------------------------------------------------------
+%%% config file related helpers
+%%%---------------------------------------------------------------------------
+
+%% @doc Load configuration from TOML file.
+
+-spec read_config_file(file:filename()) ->
+  {ok, config()} | {error, {config_format | config_read, term()}}.
+
+read_config_file(ConfigFile) ->
+  case file:read_file(ConfigFile) of
+    {ok, Content} ->
+      case etoml:parse(Content) of
+        {ok, Config} -> {ok, Config};
+        {error, Reason} -> {error, {config_format, Reason}}
+      end;
+    {error, Reason} ->
+      {error, {config_read, Reason}}
+  end.
+
+format_etoml_error({invalid_key, Line}) ->
+  io_lib:format("line ~B: invalid key name", [Line]);
+format_etoml_error({invalid_group, Line}) ->
+  io_lib:format("line ~B: invalid group name", [Line]);
+format_etoml_error({invalid_date, Line}) ->
+  io_lib:format("line ~B: invalid date format", [Line]);
+format_etoml_error({invalid_number, Line}) ->
+  io_lib:format("line ~B: invalid number value or forgotten quotes", [Line]);
+format_etoml_error({invalid_array, Line}) ->
+  io_lib:format("line ~B: invalid array format", [Line]);
+format_etoml_error({invalid_string, Line}) ->
+  io_lib:format("line ~B: invalid string format", [Line]);
+format_etoml_error({undefined_value, Line}) ->
+  io_lib:format("line ~B: value not provided", [Line]);
+format_etoml_error({duplicated_key, Key}) ->
+  io_lib:format("duplicated key: ~s", [Key]).
+
+%% @doc Configure environment (Erlang, Indira, main app) from loaded config.
+
+-spec setup_applications(config(), #opts{}) ->
+  {ok, [indira_app:daemon_option()]} | {error, term()}.
 
 setup_applications(Config, Options) ->
-  case setup_harpcaller(Config) of
+  case configure_harpcaller(Config, Options) of
     ok ->
       case setup_logging(Config, Options) of
-        ok -> indira_options(Config, Options);
+        ok -> prepare_indira_options(Config, Options);
         {error, Reason} -> {error, Reason}
       end;
     {error, Reason} ->
@@ -249,12 +401,14 @@ setup_applications(Config, Options) ->
   end.
 
 %%----------------------------------------------------------
-%% setup HarpCaller, Indira, and `error_logger' {{{
+%% configure_harpcaller() {{{
 
--spec setup_harpcaller([{binary(), term()}]) ->
-  ok | {error, {invalid_option_format, binary()} | no_listen_addresses}.
+%% @doc Configure the main application.
 
-setup_harpcaller(Config) ->
+-spec configure_harpcaller(config(), #opts{}) ->
+  ok | {error, {bad_option, binary()} | no_listen_addresses}.
+
+configure_harpcaller(GlobalConfig, _Options) ->
   SetSpecs = [
     {<<"listen">>,          {harpcaller, listen}},
     {<<"stream_directory">>,{harpcaller, stream_directory}},
@@ -267,54 +421,89 @@ setup_harpcaller(Config) ->
     {<<"host_db_refresh">>, {harpcaller, host_db_refresh}},
     {<<"log_handlers">>,    {harpcaller, log_handlers}}
   ],
-  case indira_app:set_env(fun config_opt/3, Config, SetSpecs) of
+  case indira_app:set_env(fun config_check/3, GlobalConfig, SetSpecs) of
     ok ->
       ok;
-    {error, {Key, _EnvKey, invalid_option_format}} ->
-      {error, {invalid_option_format, Key}};
+    {error, {Key, _EnvKey, bad_option}} ->
+      {error, {bad_option, Key}};
     {error, {_Key, _EnvKey, no_listen_addresses}} ->
       {error, no_listen_addresses}
   end.
 
--spec indira_options([{binary(), term()}], [{atom(), term()}]) ->
-  {ok, [{atom(), term()}]} | {error, term()}.
+%% @doc Validate values loaded from config file.
+%%
+%% @see indira_app:set_env/3
 
-indira_options(Config, Options) ->
-  % TODO: precise pinpointing what option was invalid
-  ErlangConfig = proplists:get_value(<<"erlang">>, Config, []),
-  try
-    % values from `Options' are guaranteed to be of proper format
-    PidFile = proplists:get_value(pidfile, Options),
-    NodeName = proplists:get_value(<<"node_name">>, ErlangConfig),
-    true = (NodeName == undefined orelse is_binary(NodeName)),
-    NameType = proplists:get_value(<<"name_type">>, ErlangConfig),
-    true = (NameType == undefined orelse
-            NameType == <<"longnames">> orelse NameType == <<"shortnames">>),
-    Cookie = case proplists:get_value(<<"cookie_file">>, ErlangConfig) of
-      CookieFile when is_binary(CookieFile) -> {file, CookieFile};
-      undefined -> none
-    end,
-    NetStart = proplists:get_value(<<"distributed_immediate">>, ErlangConfig, false),
-    true = is_boolean(NetStart),
-    IndiraOptions = [
-      {pidfile, PidFile},
-      {node_name, make_atom(NodeName)},
-      {name_type, make_atom(NameType)},
-      {cookie, Cookie},
-      {net_start, NetStart}
-    ],
-    {ok, IndiraOptions}
+config_check(_Key, _EnvKey, undefined = _Value) ->
+  ignore;
+
+config_check(<<"listen">> = _Key, _EnvKey, Specs) ->
+  try [parse_listen_spec(S) || S <- Specs] of
+    [] -> {error, no_listen_addresses};
+    Addresses -> {ok, Addresses}
   catch
-    error:_ ->
-      {error, invalid_option_format}
+    error:_ -> {error, bad_option}
+  end;
+
+config_check(<<"stream_directory">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+config_check(<<"default_timeout">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
+  ok;
+
+config_check(<<"max_exec_time">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
+  ok;
+
+config_check(<<"ca_file">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+config_check(<<"known_certs_file">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+config_check(<<"host_db_script">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+config_check(<<"host_db">> = _Key, _EnvKey, Path) when is_binary(Path) ->
+  {ok, binary_to_list(Path)};
+
+config_check(<<"host_db_refresh">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
+  ok;
+
+config_check(<<"log_handlers">> = _Key, _EnvKey, Handlers) ->
+  try
+    {ok, [{binary_to_atom(H, utf8), []} || H <- Handlers]}
+  catch
+    error:_ -> {error, bad_option}
+  end;
+
+config_check(_Key, _EnvKey, _Value) ->
+  {error, bad_option}.
+
+%% @doc Parse a listen address to a tuple suitable for HTTP or TCP listeners.
+%%
+%% @see config_check/3
+
+parse_listen_spec(Spec) ->
+  case binary:split(Spec, <<":">>) of
+    [<<"*">>, Port] ->
+      {any, list_to_integer(binary_to_list(Port))};
+    [Host, Port] ->
+      {binary_to_list(Host), list_to_integer(binary_to_list(Port))}
   end.
 
--spec setup_logging([{binary(), term()}], [{atom(), term()}]) ->
-  ok | {error, invalid_option_format | {log_file, file:posix()} |
+%% }}}
+%%----------------------------------------------------------
+%% setup_logging() {{{
+
+%% @doc Configure Erlang logging.
+%%   This function also starts SASL application if requested.
+
+-spec setup_logging(config(), #opts{}) ->
+  ok | {error, bad_option | {log_file, file:posix()} |
                bad_logger_module}.
 
-setup_logging(Config, Options) ->
-  case proplists:get_bool(debug, Options) of
+setup_logging(Config, _Options = #opts{options = CLIOpts}) ->
+  case proplists:get_bool(debug, CLIOpts) of
     true -> ok = application:start(sasl);
     false -> ok
   end,
@@ -330,346 +519,212 @@ setup_logging(Config, Options) ->
     undefined ->
       ok;
     _ ->
-      {error, invalid_option_format}
+      {error, bad_option}
   end.
 
 %% }}}
 %%----------------------------------------------------------
-%% check options from config file {{{
+%% prepare_indira_options() {{{
 
-config_opt(_Key, _EnvKey, undefined = _Value) ->
-  ignore;
+%% @doc Prepare options for {@link indira_app:daemonize/2} from loaded config.
 
-config_opt(<<"listen">> = _Key, _EnvKey, Specs) ->
-  try [parse_listen_spec(S) || S <- Specs] of
-    [] -> {error, no_listen_addresses};
-    Addresses -> {ok, Addresses}
-  catch
-    error:_ -> {error, invalid_option_format}
-  end;
+-spec prepare_indira_options(config(), #opts{}) ->
+  {ok, [indira_app:daemon_option()]} | {error, term()}.
 
-config_opt(<<"stream_directory">> = _Key, _EnvKey, Path) when is_binary(Path) ->
-  {ok, binary_to_list(Path)};
-
-config_opt(<<"default_timeout">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
-  ok;
-
-config_opt(<<"max_exec_time">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
-  ok;
-
-config_opt(<<"ca_file">> = _Key, _EnvKey, Path) when is_binary(Path) ->
-  {ok, binary_to_list(Path)};
-
-config_opt(<<"known_certs_file">> = _Key, _EnvKey, Path) when is_binary(Path) ->
-  {ok, binary_to_list(Path)};
-
-config_opt(<<"host_db_script">> = _Key, _EnvKey, Path) when is_binary(Path) ->
-  {ok, binary_to_list(Path)};
-
-config_opt(<<"host_db">> = _Key, _EnvKey, Path) when is_binary(Path) ->
-  {ok, binary_to_list(Path)};
-
-config_opt(<<"host_db_refresh">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
-  ok;
-
-config_opt(<<"log_handlers">> = _Key, _EnvKey, Handlers) ->
+prepare_indira_options(GlobalConfig, _Options = #opts{options = CLIOpts}) ->
+  % TODO: precise pinpointing what option was invalid
+  ErlangConfig = proplists:get_value(<<"erlang">>, GlobalConfig, []),
   try
-    {ok, [{binary_to_atom(H, utf8), []} || H <- Handlers]}
-  catch
-    error:_ -> {error, invalid_option_format}
-  end;
-
-config_opt(_Key, _EnvKey, _Value) ->
-  {error, invalid_option_format}.
-
-%% }}}
-%%----------------------------------------------------------
-%% smaller helpers {{{
-
-parse_listen_spec(Spec) when is_binary(Spec) ->
-  % die when the listen specification doesn't match what we expect
-  case binary:split(Spec, <<":">>) of
-    [<<"*">>, PortBin] -> {any, make_int(PortBin)};
-    [AddrBin, PortBin] -> {binary_to_list(AddrBin), make_int(PortBin)}
-  end.
-
-make_atom(String) when is_binary(String) ->
-  binary_to_atom(String, utf8);
-make_atom(String) when is_atom(String) ->
-  String.
-
-make_int(Num) when is_binary(Num) ->
-  list_to_integer(binary_to_list(Num)).
-
-%% }}}
-%%----------------------------------------------------------
-
-%%%---------------------------------------------------------------------------
-%%% config file loading
-%%%---------------------------------------------------------------------------
-
--spec load_config_file(file:filename()) ->
-    {ok, Config :: [{binary(), term()}]}
-  | {error, {config_reading_error | config_parse_error, term()}}.
-
-load_config_file(ConfigFile) ->
-  case file:read_file(ConfigFile) of
-    {ok, ConfigContent} ->
-      case etoml:parse(ConfigContent) of
-        {ok, Config} ->
-          {ok, Config};
-        {error, Reason} ->
-          {error, {config_parse_error, Reason}}
-      end;
-    {error, Reason} ->
-      {error, {config_reading_error, Reason}}
-  end.
-
-%%%---------------------------------------------------------------------------
-%%% command line parsing
-%%%---------------------------------------------------------------------------
-
-help(Script) ->
-  _HelpMessage = [
-    "HarpCaller daemon.\n",
-    "\n",
-    "Daemon control:\n",
-    "  ", Script, " [--socket=...] start [--debug] [--config=...] [--pidfile=...]\n",
-    "  ", Script, " [--socket=...] status [--wait [--timeout=...]]\n",
-    "  ", Script, " [--socket=...] stop [--timeout=...] [--print-pid]\n",
-    "  ", Script, " [--socket=...] reload-config\n",
-    "Jobs:\n",
-    "  ", Script, " [--socket=...] list\n",
-    "  ", Script, " [--socket=...] info <job-id>\n",
-    "  ", Script, " [--socket=...] cancel <job-id>\n",
-    "Hosts registry:\n",
-    "  ", Script, " [--socket=...] hosts-list\n",
-    "  ", Script, " [--socket=...] hosts-refresh\n",
-    "Job queues:\n",
-    "  ", Script, " [--socket=...] queue-list\n",
-    "  ", Script, " [--socket=...] queue-list <queue-name>\n",
-    "  ", Script, " [--socket=...] queue-cancel <queue-name>\n",
-    "Distributed Erlang support:\n",
-    "  ", Script, " [--socket=...] dist-erl-start\n",
-    "  ", Script, " [--socket=...] dist-erl-stop\n",
-    "Log handling/rotation:\n",
-    "  ", Script, " [--socket=...] prune-jobs [--age=<days>]\n",
-    "  ", Script, " [--socket=...] reopen-logs\n"
-  ].
-
--spec cli_opt(string() | [string()], #cmd{}) ->
-  #cmd{} | {error, help | invalid_option | invalid_command |
-                          excessive_argument |
-                          invalid_pruning_age | invalid_timeout |
-                          invalid_queue_name}.
-
-cli_opt("--help", _Cmd) ->
-  {error, help};
-cli_opt("-h", _Cmd) ->
-  {error, help};
-
-cli_opt("--debug", Cmd = #cmd{options = Options}) ->
-  _NewCmd = Cmd#cmd{options = [{debug, true} | Options]};
-
-cli_opt("--wait", Cmd = #cmd{options = Options}) ->
-  _NewCmd = Cmd#cmd{options = [{wait, true} | Options]};
-
-cli_opt("--print-pid", Cmd = #cmd{options = Options}) ->
-  _NewCmd = Cmd#cmd{options = [{print_pid, true} | Options]};
-
-cli_opt("--socket=" ++ Socket, Cmd) ->
-  cli_opt(["--socket", Socket], Cmd);
-cli_opt("--socket", _Cmd) ->
-  {need, 1};
-cli_opt(["--socket", Socket], Cmd) ->
-  _NewCmd = Cmd#cmd{socket = Socket};
-
-cli_opt("--config=" ++ Path, Cmd) ->
-  cli_opt(["--config", Path], Cmd);
-cli_opt("--config", _Cmd) ->
-  {need, 1};
-cli_opt(["--config", Path], Cmd = #cmd{options = Options}) ->
-  _NewCmd = Cmd#cmd{options = [{config, Path} | Options]};
-
-cli_opt("--pidfile=" ++ Path, Cmd) ->
-  cli_opt(["--pidfile", Path], Cmd);
-cli_opt("--pidfile", _Cmd) ->
-  {need, 1};
-cli_opt(["--pidfile", Path], Cmd = #cmd{options = Options}) ->
-  _NewCmd = Cmd#cmd{options = [{pidfile, Path} | Options]};
-
-cli_opt("--timeout=" ++ Seconds, Cmd) ->
-  cli_opt(["--timeout", Seconds], Cmd);
-cli_opt("--timeout", _Cmd) ->
-  {need, 1};
-cli_opt(["--timeout", Seconds], Cmd = #cmd{options = Options}) ->
-  try
-    Timeout = list_to_integer(Seconds),
-    true = (Timeout > 0),
-    _NewCmd = Cmd#cmd{options = [{timeout, 1000 * Timeout} | Options]}
+    PidFile = proplists:get_value(pidfile, CLIOpts),
+    % PidFile is already a string or undefined
+    NodeName = proplists:get_value(<<"node_name">>, ErlangConfig),
+    true = (is_binary(NodeName) orelse NodeName == undefined),
+    NameType = proplists:get_value(<<"name_type">>, ErlangConfig),
+    true = (NameType == undefined orelse
+            NameType == <<"longnames">> orelse NameType == <<"shortnames">>),
+    Cookie = case proplists:get_value(<<"cookie_file">>, ErlangConfig) of
+      CookieFile when is_binary(CookieFile) -> {file, CookieFile};
+      undefined -> none
+    end,
+    NetStart = proplists:get_bool(<<"distributed_immediate">>, ErlangConfig),
+    true = is_boolean(NetStart),
+    IndiraOptions = [
+      {pidfile, PidFile},
+      {node_name, ensure_atom(NodeName)},
+      {name_type, ensure_atom(NameType)},
+      {cookie, Cookie},
+      {net_start, NetStart}
+    ],
+    {ok, IndiraOptions}
   catch
     error:_ ->
-      {error, invalid_timeout}
-  end;
+      {error, bad_option}
+  end.
 
-cli_opt("--age=" ++ Days, Cmd) ->
-  cli_opt(["--age", Days], Cmd);
-cli_opt("--age", _Cmd) ->
+%% @doc Ensure a value is an atom.
+
+-spec ensure_atom(binary() | atom()) ->
+  atom().
+
+ensure_atom(Value) when is_atom(Value) -> Value;
+ensure_atom(Value) when is_binary(Value) -> binary_to_atom(Value, utf8).
+
+%% }}}
+%%----------------------------------------------------------
+
+%%%---------------------------------------------------------------------------
+%%% various helpers
+%%%---------------------------------------------------------------------------
+
+%%----------------------------------------------------------
+%% parsing command line arguments {{{
+
+%% @doc Command line argument parser for {@link indira_cli:folds/3}.
+
+-spec cli_opt(string() | [string()], #opts{}) ->
+  #opts{} | {error, help | bad_option | bad_command | excessive_argument
+                    | bad_pruning_age | bad_timeout | bad_queue_name}.
+
+cli_opt("-h" = _Arg, _Opts) ->
+  {error, help};
+cli_opt("--help" = _Arg, _Opts) ->
+  {error, help};
+
+cli_opt("--socket=" ++ Socket = _Arg, Opts) ->
+  cli_opt(["--socket", Socket], Opts);
+cli_opt("--socket" = _Arg, _Opts) ->
   {need, 1};
-cli_opt(["--age", Days], Cmd = #cmd{options = Options}) ->
-  try
-    Age = list_to_integer(Days),
-    true = (Age > 0),
-    _NewCmd = Cmd#cmd{options = [{age, Age} | Options]}
-  catch
-    error:_ ->
-      {error, invalid_pruning_age}
+cli_opt(["--socket", Socket] = _Arg, Opts) ->
+  _NewOpts = Opts#opts{admin_socket = Socket};
+
+cli_opt("--pidfile=" ++ Path = _Arg, Opts) ->
+  cli_opt(["--pidfile", Path], Opts);
+cli_opt("--pidfile" = _Arg, _Opts) ->
+  {need, 1};
+cli_opt(["--pidfile", Path] = _Arg, Opts = #opts{options = CLIOpts}) ->
+  _NewOpts = Opts#opts{options = [{pidfile, Path} | CLIOpts]};
+
+cli_opt("--config=" ++ Path = _Arg, Opts) ->
+  cli_opt(["--config", Path], Opts);
+cli_opt("--config" = _Arg, _Opts) ->
+  {need, 1};
+cli_opt(["--config", Path] = _Arg, Opts = #opts{options = CLIOpts}) ->
+  _NewOpts = Opts#opts{options = [{config, Path} | CLIOpts]};
+
+cli_opt("--timeout=" ++ Timeout = _Arg, Opts) ->
+  cli_opt(["--timeout", Timeout], Opts);
+cli_opt("--timeout" = _Arg, _Opts) ->
+  {need, 1};
+cli_opt(["--timeout", Timeout] = _Arg, Opts = #opts{options = CLIOpts}) ->
+  case make_integer(Timeout) of
+    {ok, Seconds} when Seconds > 0 ->
+      % NOTE: we need timeout in milliseconds
+      _NewOpts = Opts#opts{options = [{timeout, Seconds * 1000} | CLIOpts]};
+    _ ->
+      {error, bad_timeout}
   end;
 
-cli_opt("-" ++ _, _Cmd) ->
-  {error, invalid_option};
+cli_opt("--age=" ++ Age = _Arg, Opts) ->
+  cli_opt(["--age", Age], Opts);
+cli_opt("--age" = _Arg, _Opts) ->
+  {need, 1};
+cli_opt(["--age", Age] = _Arg, Opts = #opts{options = CLIOpts}) ->
+  case make_integer(Age) of
+    {ok, Days} when Days > 0 ->
+      _NewOpts = Opts#opts{options = [{age, Days} | CLIOpts]};
+    _ ->
+      {error, bad_pruning_age}
+  end;
 
-cli_opt("start", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = start};
+cli_opt("--debug" = _Arg, Opts = #opts{options = CLIOpts}) ->
+  _NewOpts = Opts#opts{options = [{debug, true} | CLIOpts]};
 
-cli_opt("stop", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = stop};
+cli_opt("--wait" = _Arg, Opts = #opts{options = CLIOpts}) ->
+  _NewOpts = Opts#opts{options = [{wait, true} | CLIOpts]};
 
-cli_opt("status", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = status};
+cli_opt("--print-pid" = _Arg, Opts = #opts{options = CLIOpts}) ->
+  _NewOpts = Opts#opts{options = [{print_pid, true} | CLIOpts]};
 
-cli_opt("reload-config", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = reload_config};
+cli_opt("-" ++ _ = _Arg, _Opts) ->
+  {error, bad_option};
 
-cli_opt("list", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = list_jobs};
+cli_opt(Arg, Opts = #opts{op = undefined}) ->
+  case Arg of
+    "start"  -> Opts#opts{op = start};
+    "status" -> Opts#opts{op = status};
+    "stop"   -> Opts#opts{op = stop};
+    "reload-config" -> Opts#opts{op = reload_config};
+    "prune-jobs"  -> Opts#opts{op = prune_jobs};
+    "reopen-logs" -> Opts#opts{op = reopen_logs};
+    "dist-erl-start" -> Opts#opts{op = dist_start};
+    "dist-erl-stop"  -> Opts#opts{op = dist_stop};
+    "list"   -> Opts#opts{op = list_jobs};
+    "info"   -> Opts#opts{op = {job_info, undefined}};
+    "cancel" -> Opts#opts{op = {cancel_job, undefined}};
+    "hosts-list"    -> Opts#opts{op = list_hosts};
+    "hosts-refresh" -> Opts#opts{op = refresh_hosts};
+    "queue-list"    -> Opts#opts{op = list_queues};
+    "queue-cancel"  -> Opts#opts{op = {cancel_queue, undefined}};
+    _ -> {error, bad_command}
+  end;
 
-cli_opt("info", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = {job_info, undefined}};
-cli_opt(JobID, Cmd = #cmd{op = {job_info, undefined}}) ->
-  _NewCmd = Cmd#cmd{op = {job_info, JobID}};
+cli_opt(JobID = _Arg, Opts = #opts{op = {job_info, undefined}}) ->
+  _NewOpts = Opts#opts{op = {job_info, JobID}};
 
-cli_opt("cancel", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = {cancel_job, undefined}};
-cli_opt(JobID, Cmd = #cmd{op = {cancel_job, undefined}}) ->
-  _NewCmd = Cmd#cmd{op = {cancel_job, JobID}};
+cli_opt(JobID = _Arg, Opts = #opts{op = {cancel_job, undefined}}) ->
+  _NewOpts = Opts#opts{op = {cancel_job, JobID}};
 
-cli_opt("hosts-list", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = list_hosts};
-
-cli_opt("hosts-refresh", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = refresh_hosts};
-
-cli_opt("queue-list", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = list_queues};
-cli_opt(Queue, Cmd = #cmd{op = list_queues}) ->
+cli_opt(Queue = _Arg, Opts = #opts{op = list_queues}) ->
   case indira_json:decode(Queue) of
-    {ok, Struct} -> _NewCmd = Cmd#cmd{op = {list_queue, Struct}};
-    {error, _} -> {error, invalid_queue_name}
+    {ok, Struct} -> _NewOpts = Opts#opts{op = {list_queue, Struct}};
+    {error, _} -> {error, bad_queue_name}
   end;
 
-cli_opt("queue-cancel", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = {cancel_queue, undefined}};
-cli_opt(Queue, Cmd = #cmd{op = {cancel_queue, undefined}}) ->
+cli_opt(Queue = _Arg, Opts = #opts{op = {cancel_queue, undefined}}) ->
   case indira_json:decode(Queue) of
-    {ok, Struct} -> _NewCmd = Cmd#cmd{op = {cancel_queue, Struct}};
-    {error, _} -> {error, invalid_queue_name}
+    {ok, Struct} -> _NewOpts = Opts#opts{op = {cancel_queue, Struct}};
+    {error, _} -> {error, bad_queue_name}
   end;
 
-cli_opt("dist-erl-start", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = dist_start};
-
-cli_opt("dist-erl-stop", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = dist_stop};
-
-cli_opt("prune-jobs", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = prune_jobs};
-
-cli_opt("reopen-logs", Cmd = #cmd{op = undefined}) ->
-  _NewCmd = Cmd#cmd{op = reopen_logs};
-
-cli_opt(_Arg, _Cmd = #cmd{op = undefined}) ->
-  {error, invalid_command};
-
-cli_opt(_Arg, _Cmd) ->
+cli_opt(_Arg, _Opts) ->
   {error, excessive_argument}.
 
-%%%---------------------------------------------------------------------------
+%% @doc Helper to convert string to integer.
+%%
+%%   Doesn't die on invalid argument.
 
--spec format_error(term()) ->
-  iolist() | binary().
+-spec make_integer(string()) ->
+  {ok, integer()} | {error, badarg}.
 
-%% `gen_indira_cli' callback returns invalid value
-format_error({bad_return_value, Value}) ->
-  io_lib:format("invalid return value from callback: ~1024p", [Value]);
+make_integer(String) ->
+  try list_to_integer(String) of
+    Integer -> {ok, Integer}
+  catch
+    error:badarg -> {error, badarg}
+  end.
 
-%% parse_arguments()
-format_error({arguments, {invalid_option, Arg}}) ->
-  ["invalid option: ", Arg];
-format_error({arguments, {invalid_command, Arg}}) ->
-  ["invalid command: ", Arg];
-format_error({arguments, {excessive_argument, Arg}}) ->
-  ["excessive argument: ", Arg];
-format_error({arguments, {invalid_pruning_age, _Arg}}) ->
-  "invalid log pruning age";
-format_error({arguments, {invalid_timeout, _Arg}}) ->
-  "invalid timeout";
-format_error({arguments, {invalid_queue_name, _Arg}}) ->
-  "invalid queue name";
+%% }}}
+%%----------------------------------------------------------
+%% printing lines to STDOUT and STDERR {{{
 
-%% "send request-receive reply-handle reply" operation mode
-format_error({send, bad_request_format}) ->
-  "invalid request format (programmer's error)";
-format_error({send, bad_reply_format}) ->
-  "invalid reply format (daemon's error)";
-format_error({send, Reason}) ->
-  io_lib:format("request sending error: ~1024p", [Reason]);
+%% @doc Print a string to STDOUT, ending it with a new line.
 
-%% TOML reading (file:read_file())
-format_error({config_reading_error, Reason}) ->
-  ["config reading error: ", file:format_error(Reason)];
+-spec println(iolist() | binary()) ->
+  ok.
 
-%% TOML parsing
-format_error({config_parse_error, {invalid_key, Line}}) ->
-  io_lib:format("line ~B: invalid key name", [Line]);
-format_error({config_parse_error, {invalid_group, Line}}) ->
-  io_lib:format("line ~B: invalid group name", [Line]);
-format_error({config_parse_error, {invalid_date, Line}}) ->
-  io_lib:format("line ~B: invalid date format", [Line]);
-format_error({config_parse_error, {invalid_number, Line}}) ->
-  io_lib:format("line ~B: invalid number value or forgotten quotes", [Line]);
-format_error({config_parse_error, {invalid_array, Line}}) ->
-  io_lib:format("line ~B: invalid array format", [Line]);
-format_error({config_parse_error, {invalid_string, Line}}) ->
-  io_lib:format("line ~B: invalid string format", [Line]);
-format_error({config_parse_error, {undefined_value, Line}}) ->
-  io_lib:format("line ~B: value not provided", [Line]);
-format_error({config_parse_error, {duplicated_key, Key}}) ->
-  io_lib:format("duplicated key: ~s", [Key]);
+println(Line) ->
+  io:put_chars([Line, $\n]).
 
-%% setup_harpcaller()
-format_error({invalid_option_format, Option}) ->
-  ["invalid config option: ", Option];
-format_error(no_listen_addresses) ->
-  "no listen addresses in configuration";
-%% indira_options() and setup_logging()
-format_error(invalid_option_format) ->
-  "invalid config option in [erlang] section";
-format_error({log_file, Reason}) ->
-  ["log writing error: ", indira_disk_h:format_error(Reason)];
+%% @doc Print a JSON structure to STDOUT, ending it with a new line.
 
-%% options to indira_app:daemonize() are guaranteed to be of proper format
+-spec print_json(indira_json:struct()) ->
+  ok.
 
-format_error({unknown_status, Status}) ->
-  ["unknown status: ", Status];
-
-%% `harpcaller_command_handler:parse_reply()'
-format_error(Message) when is_binary(Message) ->
-  Message;
-
-%% unrecognized errors
-format_error(Reason) ->
-  io_lib:format("unrecognized error: ~1024p", [Reason]).
+print_json(Struct) ->
+  {ok, JSON} = indira_json:encode(Struct),
+  io:put_chars([JSON, $\n]).
+%% }}}
+%%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

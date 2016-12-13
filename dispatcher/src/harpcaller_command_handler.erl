@@ -11,7 +11,7 @@
 %% gen_indira_command callbacks
 -export([handle_command/2]).
 
-%% `harpcaller_cli_handler' interface
+%% interface for `harpcaller_cli_handler'
 -export([format_request/1, parse_reply/2, hardcoded_reply/1]).
 
 %%%---------------------------------------------------------------------------
@@ -21,25 +21,51 @@
 %%----------------------------------------------------------
 %% daemon control
 
-handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
-  harpcaller_log:info(control, "stopping harpcaller daemon", []),
-  init:stop(),
-  [{result, ok}, {pid, list_to_binary(os:getpid())}];
-
-handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, true}] = _Command,
-               _Args) ->
-  true = wait_for_start(),
-  [{result, <<"running">>}];
+%% @private
+%% @doc Handle administrative commands sent to the daemon.
 
 handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, false}] = _Command,
                _Args) ->
   case is_started() of
-    true  -> [{result, <<"running">>}];
-    false -> [{result, <<"stopped">>}]
+    true  -> [{result, running}];
+    false -> [{result, stopped}]
+  end;
+handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, true}] = _Command,
+               _Args) ->
+  case wait_for_start() of
+    true  -> [{result, running}];
+    false -> [{result, stopped}]
   end;
 
+handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
+  log_info(stop, "stopping HarpCaller daemon", []),
+  init:stop(),
+  [{result, ok}, {pid, list_to_binary(os:getpid())}];
+
 handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
-  [{error, <<"command not implemented yet">>}];
+  log_info(reload_config, "reloading configuration (TODO)", []),
+  [{result, error}, {message, <<"command not implemented yet">>}];
+
+%%----------------------------------------------------------
+%% Log handling/rotation
+
+handle_command([{<<"command">>, <<"prune_jobs">>},
+                {<<"max_age">>, Age}] = _Command, _Args) ->
+  log_info(prune_jobs, "pruning old jobs", [{max_age, Age}]),
+  harp_sdb:remove_older(Age),
+  [{result, ok}];
+
+handle_command([{<<"command">>, <<"reopen_logs">>}] = _Command, _Args) ->
+  log_info(reopen_logs, "reopening log files", []),
+  case reopen_error_logger_file() of
+    ok ->
+      log_info(reopen_logs, "reopened log for error_logger", []),
+      [{result, ok}];
+    {error, Message} ->
+      log_error(reopen_logs, "error_logger reopen error",
+                [{error, Message}]),
+      [{result, error}, {message, Message}]
+  end;
 
 %%----------------------------------------------------------
 %% RPC job control
@@ -50,6 +76,7 @@ handle_command([{<<"command">>, <<"list_jobs">>}] = _Command, _Args) ->
 
 handle_command([{<<"command">>, <<"cancel_job">>},
                 {<<"job">>, JobID}] = _Command, _Args) ->
+  log_info(cancel_job, "cancelling a job", [{job, JobID}]),
   case harpcaller_caller:cancel(binary_to_list(JobID)) of
     ok -> [{result, ok}];
     undefined -> [{result, no_such_job}]
@@ -72,6 +99,7 @@ handle_command([{<<"command">>, <<"list_hosts">>}] = _Command, _Args) ->
   [{result, ok}, {hosts, Hosts}];
 
 handle_command([{<<"command">>, <<"refresh_hosts">>}] = _Command, _Args) ->
+  log_info(refresh_hosts, "refreshing hosts", []),
   harpcaller_hostdb:refresh(),
   [{result, ok}];
 
@@ -89,6 +117,7 @@ handle_command([{<<"command">>, <<"list_queue">>},
 
 handle_command([{<<"command">>, <<"cancel_queue">>},
                 {<<"queue">>, Queue}] = _Command, _Args) ->
+  log_info(cancel_queue, "cancelling all jobs in a queue", [{queue, Queue}]),
   harpcaller_call_queue:cancel(Queue),
   [{result, ok}];
 
@@ -96,59 +125,49 @@ handle_command([{<<"command">>, <<"cancel_queue">>},
 %% Erlang networking control
 
 handle_command([{<<"command">>, <<"dist_start">>}] = _Command, _Args) ->
-  % TODO: handle errors
-  ok = indira_app:distributed_start(),
-  [{result, ok}];
+  log_info(dist_start, "starting Erlang networking", []),
+  case indira_app:distributed_start() of
+    ok ->
+      [{result, ok}];
+    {error, Reason} ->
+      log_error(dist_start, "can't setup Erlang networking",
+                [{error, {term, Reason}}]),
+      [{result, error}, {message, <<"Erlang networking error">>}]
+  end;
 
 handle_command([{<<"command">>, <<"dist_stop">>}] = _Command, _Args) ->
-  % TODO: handle errors
-  ok = indira_app:distributed_stop(),
-  [{result, ok}];
-
-%%----------------------------------------------------------
-%% Log handling/rotation
-
-handle_command([{<<"command">>, <<"prune_jobs">>},
-                {<<"max_age">>, Age}] = _Command, _Args) ->
-  harp_sdb:remove_older(Age),
-  [{result, ok}];
-
-handle_command([{<<"command">>, <<"reopen_logs">>}] = _Command, _Args) ->
-  % the only log file that can possibly be opened is disk log for error_logger
-  case application:get_env(harpcaller, error_logger_file) of
-    {ok, File} ->
-      case indira_disk_h:reopen(error_logger, File) of
-        ok ->
-          [{result, ok}];
-        {error, Reason} ->
-          Message = [
-            "can't open ", File, ": ", indira_disk_h:format_error(Reason)
-          ],
-          [{result, error}, {reason, iolist_to_binary(Message)}]
-      end;
-    undefined ->
-      % it's OK not to find this handler
-      indira_disk_h:remove(error_logger),
-      [{result, ok}]
+  log_info(dist_stop, "stopping Erlang networking", []),
+  case indira_app:distributed_stop() of
+    ok ->
+      [{result, ok}];
+    {error, Reason} ->
+      log_error(dist_stop, "can't shutdown Erlang networking",
+                [{error, {term, Reason}}]),
+      [{result, error}, {message, <<"Erlang networking error">>}]
   end;
 
 %%----------------------------------------------------------
 
 handle_command(_Command, _Args) ->
-  [{error, <<"unsupported command">>}].
+  [{result, error}, {message, <<"unrecognized command">>}].
 
 %%%---------------------------------------------------------------------------
 %%% interface for `harpcaller_cli_handler'
 %%%---------------------------------------------------------------------------
 
-format_request(status) ->
-  [{command, status}, {wait, false}];
-format_request(status_wait) ->
-  [{command, status}, {wait, true}];
-format_request(stop) ->
-  [{command, stop}];
-format_request(reload_config) ->
-  [{command, reload_config}];
+%% @doc Encode administrative command as a serializable structure.
+
+-spec format_request(gen_indira_cli:command()) ->
+  gen_indira_cli:request().
+
+format_request(status        = Command) -> [{command, Command}, {wait, false}];
+format_request(status_wait   =_Command) -> [{command, status}, {wait, true}];
+format_request(stop          = Command) -> [{command, Command}];
+format_request(reload_config = Command) -> [{command, Command}];
+format_request({prune_jobs, Days} = _Command) -> [{command, prune_jobs}, {max_age, Days * 24 * 3600}];
+format_request(reopen_logs   = Command) -> [{command, Command}];
+format_request(dist_start    = Command) -> [{command, Command}];
+format_request(dist_stop     = Command) -> [{command, Command}];
 
 format_request(list_jobs) ->
   [{command, list_jobs}];
@@ -171,28 +190,18 @@ format_request(list_queues) ->
 format_request({list_queue, Queue}) ->
   [{command, list_queue}, {queue, Queue}];
 format_request({cancel_queue, Queue}) ->
-  [{command, cancel_queue}, {queue, Queue}];
-
-format_request(dist_start) ->
-  [{command, dist_start}];
-format_request(dist_stop) ->
-  [{command, dist_stop}];
-
-format_request({prune_jobs, Days}) when is_integer(Days), Days > 0 ->
-  [{command, prune_jobs}, {max_age, Days * 24 * 3600}];
-format_request(reopen_logs) ->
-  [{command, reopen_logs}].
+  [{command, cancel_queue}, {queue, Queue}].
 
 parse_reply([{<<"result">>, <<"ok">>}] = _Reply, _Request) ->
   ok;
-parse_reply([{<<"reason">>, Reason}, {<<"result">>, <<"error">>}] = _Reply,
+parse_reply([{<<"message">>, Reason}, {<<"result">>, <<"error">>}] = _Reply,
             _Request) when is_binary(Reason) ->
   {error, Reason};
 
-parse_reply([{<<"result">>, Status}] = _Reply, status = _Request) ->
-  {ok, Status};
-parse_reply([{<<"result">>, Status}] = _Reply, status_wait = _Request) ->
-  {ok, Status};
+parse_reply([{<<"result">>, <<"running">>}] = _Reply, status = _Request) ->
+  running;
+parse_reply([{<<"result">>, <<"stopped">>}] = _Reply, status = _Request) ->
+  stopped;
 
 parse_reply([{<<"pid">>, Pid}, {<<"result">>, <<"ok">>}] = _Reply,
             stop = _Request) when is_binary(Pid) ->
@@ -228,9 +237,9 @@ parse_reply([{<<"jobs">>, Jobs}, {<<"result">>, <<"ok">>}] = _Reply,
 parse_reply(_Reply, _Request) ->
   {error, <<"unrecognized reply from daemon">>}.
 
-hardcoded_reply(ok = _Reply) ->
+hardcoded_reply(generic_ok = _Reply) ->
   [{<<"result">>, <<"ok">>}];
-hardcoded_reply(status_stopped = _Reply) ->
+hardcoded_reply(daemon_stopped = _Reply) ->
   [{<<"result">>, <<"stopped">>}].
 
 %%%---------------------------------------------------------------------------
@@ -311,6 +320,46 @@ format_address({A,B,C,D} = _Address) ->
   iolist_to_binary(io_lib:format("~B.~B.~B.~B", [A,B,C,D]));
 format_address(Address) when is_list(Address) ->
   list_to_binary(Address).
+
+%%%---------------------------------------------------------------------------
+%%% reopening log files
+
+-spec reopen_error_logger_file() ->
+  ok | {error, binary()}.
+
+reopen_error_logger_file() ->
+  case application:get_env(harpcaller, error_logger_file) of
+    {ok, File} ->
+      case indira_disk_h:reopen(error_logger, File) of
+        ok ->
+          ok;
+        {error, Reason} ->
+          Message = [
+            "can't open ", File, ": ", indira_disk_h:format_error(Reason)
+          ],
+          {error, iolist_to_binary(Message)}
+      end;
+    undefined ->
+      % it's OK not to find this handler
+      indira_disk_h:remove(error_logger),
+      ok
+  end.
+
+%%%---------------------------------------------------------------------------
+
+-spec log_info(atom(), harpcaller_log:event_message(),
+               harpcaller_log:event_info()) ->
+  ok.
+
+log_info(Command, Message, Context) ->
+  harpcaller_log:info(command, Message, Context ++ [{command, {term, Command}}]).
+
+-spec log_error(atom(), harpcaller_log:event_message(),
+                harpcaller_log:event_info()) ->
+  ok.
+
+log_error(Command, Message, Context) ->
+  harpcaller_log:warn(command, Message, Context ++ [{command, {term, Command}}]).
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
