@@ -328,6 +328,13 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
 handle_call(job_id = _Request, _From, State = #state{job_id = JobID}) ->
   {reply, JobID, State, 0};
 
+handle_call(cancel = _Request, _From,
+            State = #state{stream_table = StreamTable, job_id = JobID}) ->
+  harpcaller_log:info("got a cancel order"),
+  notify_followers(State, {terminated, JobID, cancelled}),
+  harp_sdb:set_result(StreamTable, cancelled),
+  {stop, normal, ok, State};
+
 %% unknown calls
 handle_call(Request, From, State) ->
   harpcaller_log:unexpected_call(Request, From, ?MODULE),
@@ -340,13 +347,6 @@ handle_cast({follow, Pid} = _Request, State = #state{followers = Followers}) ->
   Ref = erlang:monitor(process, Pid),
   ets:insert(Followers, {Pid, Ref}),
   {noreply, State, 0};
-
-handle_cast(cancel = _Request,
-            State = #state{stream_table = StreamTable, job_id = JobID}) ->
-  harpcaller_log:info("got a cancel order"),
-  notify_followers(State, {terminated, JobID, cancelled}),
-  harp_sdb:set_result(StreamTable, cancelled),
-  {stop, normal, State};
 
 %% unknown casts
 handle_cast(Request, State) ->
