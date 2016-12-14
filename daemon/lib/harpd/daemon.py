@@ -516,25 +516,33 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         except Exception, e:
             raise RequestHandler.RequestError("parse_error", str(e))
 
-        # TODO: various checks:
-        #   * request["harp"] == 1
-        #   * request["procedure"] ~~ str | unicode
-        #   * request["arguments"] ~~ dict | list
-        #   * request["auth"]["user"] ~~ str | unicode
-        #   * request["auth"]["password"] ~~ str | unicode
+        # basic structure
+        if not isinstance(request, dict):
+            raise RequestHandler.RequestError("invalid_request",
+                                              "invalid request data type")
+        if "harp" not in request or request["harp"] != 1:
+            raise RequestHandler.RequestError("invalid_request",
+                                              "unsupported protocol version")
+        # authentication data
+        auth = request.get("auth")
+        if isinstance(auth, dict) and \
+           isinstance(auth.get("user"), (unicode, str)) and \
+           isinstance(auth.get("password"), (unicode, str)):
+            creds = RequestHandler.Credentials(auth["user"], auth["password"])
+        else:
+            raise RequestHandler.RequestError("invalid_request",
+                                              "malformed credentials data")
 
-        try:
+        if isinstance(request.get("procedure"), (unicode, str)) and \
+           isinstance(request.get("arguments"), (dict, list)):
             call_request = RequestHandler.Call(
                 request["procedure"],
                 request["arguments"],
             )
-            credentials = RequestHandler.Credentials(
-                request["auth"]["user"],
-                request["auth"]["password"],
-            )
-            return (call_request, credentials)
-        except Exception, e:
-            raise RequestHandler.RequestError("invalid_request", str(e))
+            return (call_request, creds)
+        else:
+            raise RequestHandler.RequestError("invalid_request",
+                                              "invalid request")
 
     # }}}
     #-------------------------------------------------------
