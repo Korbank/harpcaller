@@ -328,13 +328,25 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         it, and sending results back.
         '''
 
-        # XXX: SystemExit exception is not caught everywhere here, so there
-        # can be a situation when it propagates without control, but I don't
-        # like huge try..except around the whole method, so I'll leave it
-
         try:
-            (proc_name, arguments, (user, password)) = self.read_request()
-            self.log_context["user"] = user
+            try:
+                (proc_name, arguments, (user, password)) = self.read_request()
+                self.log_context["user"] = user
+            except RequestHandler.RequestError, e:
+                self.log("error when reading request", error = e.struct())
+                self.send(e)
+                return
+
+            if not self.server.authdb.authenticate(user, password):
+                self.log("authentication error")
+                e = RequestHandler.RequestError(
+                    "auth_error",
+                    "unknown user or wrong password",
+                )
+                self.send(e)
+                return
+
+            self.handle_call(proc_name, arguments)
         except SystemExit:
             self.log("aborted due to shutdown")
             e = RequestHandler.RequestError(
@@ -343,20 +355,26 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             )
             self.send(e)
             return
-        except RequestHandler.RequestError, e:
-            self.log("error when reading request", error = e.struct())
-            self.send(e)
-            return
 
-        if not self.server.authdb.authenticate(user, password):
-            self.log("authentication error")
-            e = RequestHandler.RequestError(
-                "auth_error",
-                "unknown user or wrong password",
-            )
-            self.send(e)
-            return
+    def finish(self):
+        '''
+        Clean up request handler after work.
+        '''
+        pass
 
+    #-------------------------------------------------------
+    # handle_call() {{{
+
+    def handle_call(self, proc_name, arguments):
+        '''
+        :param proc_name: name of the procedure to call
+        :type proc_name: string
+        :param arguments: arguments (positional or named) to the called
+            procedure
+        :type arguments: list or dict
+
+        Handle a procedure call request.
+        '''
         self.log_context["procedure"] = proc_name
 
         if proc_name not in self.server.procedures:
@@ -419,14 +437,6 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             )
             self.send(e)
             return
-        except SystemExit:
-            self.log("aborted due to shutdown")
-            e = RequestHandler.RequestError(
-                "shutdown",
-                "service is shutting down",
-            )
-            self.send(e)
-            return
         except Exception, e:
             exception_message = {
                 "exception": {
@@ -443,11 +453,9 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             except:
                 pass # ignore error sending errors
 
-    def finish(self):
-        '''
-        Clean up request handler after work.
-        '''
-        pass
+    # }}}
+    #-------------------------------------------------------
+    # read_request() {{{
 
     def read_request(self):
         '''
@@ -506,6 +514,9 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             )
         except Exception, e:
             raise RequestHandler.RequestError("invalid_request", str(e))
+
+    # }}}
+    #-------------------------------------------------------
 
     def send(self, data):
         '''
