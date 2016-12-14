@@ -303,6 +303,20 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 
     # }}}
     #-------------------------------------------------------
+    # containers for parts of the request {{{
+
+    class Call:
+        def __init__(self, procedure, arguments):
+            self.procedure = procedure
+            self.arguments = arguments
+
+    class Credentials:
+        def __init__(self, user, password):
+            self.user = user
+            self.password = password
+
+    # }}}
+    #-------------------------------------------------------
 
     def setup(self):
         '''
@@ -330,14 +344,15 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
 
         try:
             try:
-                (proc_name, arguments, (user, password)) = self.read_request()
-                self.log_context["user"] = user
+                (request, credentials) = self.read_request()
+                self.log_context["user"] = credentials.user
             except RequestHandler.RequestError, e:
                 self.log("error when reading request", error = e.struct())
                 self.send(e)
                 return
 
-            if not self.server.authdb.authenticate(user, password):
+            if not self.server.authdb.authenticate(credentials.user,
+                                                   credentials.password):
                 self.log("authentication error")
                 e = RequestHandler.RequestError(
                     "auth_error",
@@ -346,7 +361,8 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 self.send(e)
                 return
 
-            self.handle_call(proc_name, arguments)
+            # XXX: request is `RequestHandler.Call'
+            self.handle_call(request.procedure, request.arguments)
         except SystemExit:
             self.log("aborted due to shutdown")
             e = RequestHandler.RequestError(
@@ -460,7 +476,8 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
     def read_request(self):
         '''
         :return: procedure name, its arguments, and authentication data
-        :rtype: tuple (unicode, dict | list, (unicode, unicode))
+        :rtype: tuple (:class:`RequestHandler.Call`,
+            :class:`RequestHandler.Credentials`)
         :raise: :exc:`RequestHandler.RequestError`
 
         Read call request from socket.
@@ -507,11 +524,15 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         #   * request["auth"]["password"] ~~ str | unicode
 
         try:
-            return (
+            call_request = RequestHandler.Call(
                 request["procedure"],
                 request["arguments"],
-                (request["auth"]["user"], request["auth"]["password"])
             )
+            credentials = RequestHandler.Credentials(
+                request["auth"]["user"],
+                request["auth"]["password"],
+            )
+            return (call_request, credentials)
         except Exception, e:
             raise RequestHandler.RequestError("invalid_request", str(e))
 
