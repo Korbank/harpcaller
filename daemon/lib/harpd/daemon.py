@@ -318,6 +318,12 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             exception_logger(logger, exctype, value, tb)
         sys.excepthook = excepthook
 
+        self.logger = logging.getLogger("harpd.daemon.handle_client")
+        self.log_context = log(
+            client_address = self.client_address[0],
+            client_port = self.client_address[1],
+        )
+
     def handle(self):
         '''
         Handle the connection. This means reading client's request, processing
@@ -328,14 +334,11 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         # can be a situation when it propagates without control, but I don't
         # like huge try..except around the whole method, so I'll leave it
 
-        logger = logging.getLogger("harpd.daemon.handle_client")
-
         try:
             (proc_name, arguments, (user, password)) = self.read_request()
+            self.log_context["user"] = user
         except SystemExit:
-            logger.info(log("aborted due to shutdown",
-                            client_address = self.client_address[0],
-                            client_port = self.client_address[1]))
+            self.log("aborted due to shutdown")
             e = RequestHandler.RequestError(
                 "shutdown",
                 "service is shutting down",
@@ -343,18 +346,12 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             self.send(e.struct())
             return
         except RequestHandler.RequestError, e:
-            logger.info(log("error when reading request",
-                            client_address = self.client_address[0],
-                            client_port = self.client_address[1],
-                            error = e.struct()["error"]))
+            self.log("error when reading request", error = e.struct()["error"])
             self.send(e.struct())
             return
 
         if not self.server.authdb.authenticate(user, password):
-            logger.info(log("authentication error",
-                            client_address = self.client_address[0],
-                            client_port = self.client_address[1],
-                            user = user))
+            self.log("authentication error")
             e = RequestHandler.RequestError(
                 "auth_error",
                 "unknown user or wrong password",
@@ -362,12 +359,10 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             self.send(e.struct())
             return
 
+        self.log_context["procedure"] = proc_name
+
         if proc_name not in self.server.procedures:
-            logger.info(log("no such procedure",
-                            client_address = self.client_address[0],
-                            client_port = self.client_address[1],
-                            user = user,
-                            procedure = proc_name))
+            self.log("no such procedure")
             e = RequestHandler.RequestError(
                 "no_such_procedure",
                 "no such procedure",
@@ -385,14 +380,9 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             args = ()
             kwargs = arguments
         else:
-            logger.info(log("invalid argument list in request",
-                            client_address = self.client_address[0],
-                            client_port = self.client_address[1],
-                            user = user,
-                            procedure = proc_name,
-                            # XXX: `arguments' comes from deserialized JSON,
-                            # so it can be serialized back to JSON safely
-                            argument = arguments))
+            # XXX: `arguments' comes from deserialized JSON, so it can be
+            # serialized back to JSON safely
+            self.log("invalid argument list in request", argument = arguments)
             e = RequestHandler.RequestError(
                 "invalid_argument_list",
                 "argument list is neither a list nor a hash",
@@ -401,14 +391,8 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             return
 
         try:
-            logger.info(log(
-                "calling procedure",
-                client_address = self.client_address[0],
-                client_port = self.client_address[1],
-                procedure = proc_name,
-                streaming = isinstance(procedure, proc.StreamingProcedure),
-                user = user,
-            ))
+            self.log("calling procedure",
+                     streaming = isinstance(procedure, proc.StreamingProcedure))
             self.setguid(procedure.uid, procedure.gid)
             self.set_timeout(procedure.timeout)
             if isinstance(procedure, proc.StreamingProcedure):
@@ -424,24 +408,13 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             #   - packet serialization error
             #   - result serialization error
             #   - send() error
-            logger.info(log(
-                "procedure call error",
-                client_address = self.client_address[0],
-                client_port = self.client_address[1],
-                procedure = proc_name,
-                user = user,
-                error = e.struct()["error"],
-            ))
+            self.log("procedure call error", error = e.struct()["error"])
             try:
                 self.send(e.struct())
             except:
                 pass # ignore error sending errors
         except RequestHandler.Timeout:
-            logger.info(log("execution timeout exceeded",
-                            client_address = self.client_address[0],
-                            client_port = self.client_address[1],
-                            user = user,
-                            procedure = proc_name))
+            self.log("execution timeout exceeded")
             e = RequestHandler.RequestError(
                 "timeout",
                 "maximum execution time exceeded",
@@ -449,11 +422,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             self.send(e.struct())
             return
         except SystemExit:
-            logger.info(log("aborted due to shutdown",
-                            client_address = self.client_address[0],
-                            client_port = self.client_address[1],
-                            user = user,
-                            procedure = proc_name))
+            self.log("aborted due to shutdown")
             e = RequestHandler.RequestError(
                 "shutdown",
                 "service is shutting down",
@@ -558,6 +527,17 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             # nobody to report send errors to, but it will abort a possible
             # iteration
             raise RequestHandler.RequestError("network_error", str(e))
+
+    def log(self, message, **context):
+        '''
+        :param message: message to log
+        :param context: additional attributes to attach to the log
+
+        Log a message using :mod:`logging` module.
+        '''
+        message = log(message, **context)
+        message.update(self.log_context)
+        self.logger.info(message)
 
     def set_timeout(self, timeout):
         '''
