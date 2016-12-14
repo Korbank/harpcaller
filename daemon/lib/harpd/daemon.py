@@ -850,10 +850,11 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30)
         return (client_socket, (addr, port))
 
-    # TODO: handle error (when RequestHandler.handle() raises an exception)
-    #def handle_error(self, client_socket, client_address):
-    #    #(address, port) = client_address
-    #    pass
+    def handle_error(self, client_socket, client_address):
+        if sys.exc_info()[0] is SystemExit:
+            # don't complain when Python is exiting
+            return
+        super(SSLServer, self).handle_error(client_socket, client_address)
 
     def server_activate(self):
         '''
