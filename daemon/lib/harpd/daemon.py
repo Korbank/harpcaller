@@ -283,18 +283,16 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             Return the error as a dict suitable for transmitting to client.
             '''
             if self._data is not None:
-                error = {
+                return {
                     "type": self._type,
                     "message": self._message,
                     "data": self._data,
                 }
             else:
-                error = {
+                return {
                     "type": self._type,
                     "message": self._message,
                 }
-
-            return { "harp": 1, "error": error }
 
     class Timeout(Exception):
         '''
@@ -343,11 +341,11 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 "shutdown",
                 "service is shutting down",
             )
-            self.send(e.struct())
+            self.send(e)
             return
         except RequestHandler.RequestError, e:
-            self.log("error when reading request", error = e.struct()["error"])
-            self.send(e.struct())
+            self.log("error when reading request", error = e.struct())
+            self.send(e)
             return
 
         if not self.server.authdb.authenticate(user, password):
@@ -356,7 +354,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 "auth_error",
                 "unknown user or wrong password",
             )
-            self.send(e.struct())
+            self.send(e)
             return
 
         self.log_context["procedure"] = proc_name
@@ -368,7 +366,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 "no such procedure",
                 {"procedure": proc_name},
             )
-            self.send(e.struct())
+            self.send(e)
             return
 
         procedure = self.server.procedures[proc_name]
@@ -387,7 +385,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 "invalid_argument_list",
                 "argument list is neither a list nor a hash",
             )
-            self.send(e.struct())
+            self.send(e)
             return
 
         try:
@@ -408,9 +406,9 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             #   - packet serialization error
             #   - result serialization error
             #   - send() error
-            self.log("procedure call error", error = e.struct()["error"])
+            self.log("procedure call error", error = e.struct())
             try:
-                self.send(e.struct())
+                self.send(e)
             except:
                 pass # ignore error sending errors
         except RequestHandler.Timeout:
@@ -419,7 +417,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 "timeout",
                 "maximum execution time exceeded",
             )
-            self.send(e.struct())
+            self.send(e)
             return
         except SystemExit:
             self.log("aborted due to shutdown")
@@ -427,7 +425,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                 "shutdown",
                 "service is shutting down",
             )
-            self.send(e.struct())
+            self.send(e)
             return
         except Exception, e:
             exception_message = {
@@ -512,10 +510,13 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
     def send(self, data):
         '''
         :param data: response to send
-        :type data: dict
+        :type data: dict or :class:`RequestHandler.RequestError`
 
         Send response (stream, returned value, exception, error) to client.
         '''
+        if isinstance(data, RequestHandler.RequestError):
+            data = { "harp": 1, "error": data.struct() }
+
         try:
             line = json.dumps(data, sort_keys = True)
         except Exception, e:
