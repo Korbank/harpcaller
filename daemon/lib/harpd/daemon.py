@@ -441,10 +441,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             #   - result serialization error
             #   - send() error
             self.log("procedure call error", error = e.struct())
-            try:
-                self.send(e)
-            except:
-                pass # ignore error sending errors
+            self.send(e, ignore_network_errors = True)
         except RequestHandler.Timeout:
             self.log("execution timeout exceeded")
             e = RequestHandler.RequestError(
@@ -464,10 +461,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
                     }
                 }
             }
-            try:
-                self.send(exception_message)
-            except:
-                pass # ignore error sending errors
+            self.send(exception_message, ignore_network_errors = True)
 
     # }}}
     #-------------------------------------------------------
@@ -547,7 +541,7 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
     # }}}
     #-------------------------------------------------------
 
-    def send(self, data):
+    def send(self, data, ignore_network_errors = False):
         '''
         :param data: response to send
         :type data: dict or :class:`RequestHandler.RequestError`
@@ -565,9 +559,8 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
         try:
             self.request.write(line + "\n")
         except socket.error, e:
-            # nobody to report send errors to, but it will abort a possible
-            # iteration
-            raise RequestHandler.RequestError("network_error", str(e))
+            if not ignore_network_errors:
+                raise RequestHandler.RequestError("network_error", str(e))
 
     def log(self, message, **context):
         '''
