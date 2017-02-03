@@ -1160,7 +1160,7 @@ class HarpProcedure(object):
                 return
             elif "error" in rec:
                 self._close()
-                error = reply["error"]
+                error = rec["error"]
                 raise RemoteError(
                     error["type"],
                     error["message"],
@@ -1168,7 +1168,7 @@ class HarpProcedure(object):
                 )
             elif "exception" in rec:
                 self._close()
-                error = reply["exception"]
+                error = rec["exception"]
                 raise RemoteException(
                     error["type"],
                     error["message"],
