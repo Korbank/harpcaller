@@ -575,9 +575,11 @@ class RemoteProcedure(object):
 
         Request a call to this procedure on target server to dispatcher.
         '''
-        if len(args) == 0 and len(kwargs) > 0:
+        if len(args) > 0 and len(kwargs) > 0:
+            raise HarpException("mixed keyword and positional arguments")
+        if len(kwargs) > 0:
             call_args = kwargs
-        elif len(kwargs) == 0:
+        else:
             call_args = args
 
         request = {
