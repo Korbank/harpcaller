@@ -104,24 +104,31 @@ if options.test:
     if not isinstance(python, dict):
         error("Python runtime configuration is not a hash")
 
-    def valid_string_or_string_list(path):
-        if isinstance(path, (str, unicode)):
-            return True
-        elif isinstance(path, (tuple, list)):
-            return all((isinstance(e, (str, unicode)) for e in path))
-        return False
-
-    if "path" not in python:
+    path = python.get("path")
+    if path is None:
         pass # OK
-    elif valid_string_or_string_list(python["path"]):
-        pass # OK
-    elif isinstance(python["path"], dict):
-        if "prepend" in python["path"] and \
-           not valid_string_or_string_list(python["path"]["prepend"]):
-            error("invalid python.path.prepend value")
-        if "append" in python["path"] and \
-           not valid_string_or_string_list(python["path"]["append"]):
-            error("invalid python.path.append value")
+    elif isinstance(path, (str, unicode)):
+        sys.path.append(path)
+    elif isinstance(path, (tuple, list)) and \
+         all((isinstance(e, (str, unicode)) for e in path)):
+        sys.path.extend(path)
+    elif isinstance(path, dict):
+        if "prepend" in path:
+            if isinstance(path["prepend"], (str, unicode)):
+                sys.path.insert(0, path["prepend"])
+            elif isinstance(path["prepend"], (tuple, list)) and \
+                 all((isinstance(e, (str, unicode)) for e in path["prepend"])):
+                sys.path = list(path["prepend"]) + sys.path
+            else:
+                error("invalid python.path.prepend value")
+        if "append" in path:
+            if isinstance(path["append"], (str, unicode)):
+                sys.path.append(path["append"])
+            elif isinstance(path["append"], (tuple, list)) and \
+                 all((isinstance(e, (str, unicode)) for e in path["append"])):
+                sys.path.extend(path["append"])
+            else:
+                error("invalid python.path.append value")
     else:
         error("invalid python.path value")
 
