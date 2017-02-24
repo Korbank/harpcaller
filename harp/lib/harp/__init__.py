@@ -29,10 +29,10 @@ results from already finished calls.
 
 .. autodata:: CALL_CANCELLED
 
-:program:`harpd` interface
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+:manpage:`harpd(8)` interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-These classes allow direct communication with :program:`harpd`. The
+These classes allow direct communication with :manpage:`harpd(8)`. The
 interaction is synchronous and ephemeral, unlike that with HarpCaller.
 
 .. autoclass:: HarpServer
@@ -969,14 +969,14 @@ class RemoteCall(object):
 
 class HarpServer(object):
     '''
-    :param host: address of :program:`harpd`
-    :param port: port of :program:`harpd`
+    :param host: address of :manpage:`harpd(8)`
+    :param port: port of :manpage:`harpd(8)`
     :param user: username to authenticate as
     :param password: password for the username
     :param ca_file: file with CA certificates to verify server's
         certificate against (or ``None`` for no verification)
 
-    :program:`harpd` server representation.
+    :manpage:`harpd(8)` server representation.
 
     Typical usage::
 
@@ -1028,13 +1028,14 @@ class HarpServer(object):
 
 class HarpProcedure(object):
     '''
-    Procedure on a :program:`harpd` server.
+    Procedure on a :manpage:`harpd(8)` server.
 
     Instances of this class are callable, as a normal procedure would be.
     '''
     def __init__(self, server, name):
         '''
-        :param server: :program:`harpd` where the procedure is to be executed
+        :param server: :manpage:`harpd(8)` where the procedure is to be
+            executed
         :type server: :class:`HarpServer`
         :param name: procedure name
         :type name: string

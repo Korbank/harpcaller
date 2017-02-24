@@ -4,8 +4,8 @@ Python client API
 
 .. _client-lib-examples:
 
-Example usage
-=============
+Synopsis
+========
 
 HarpCaller interaction
 ----------------------
@@ -57,6 +57,20 @@ HarpCaller interaction
            print json.dumps(msg.value)
        else:
            print "log message:", json.dumps(msg)
+
+
+Description
+===========
+
+:mod:`harp` is a Python interface to talk to HarpCaller: send a call request,
+check call status, retrieve its results, and so on. This part of the API is
+asynchronous, so it can easily be used in a web application, even if the
+remote procedures that are called take long time to finish.
+
+:mod:`harp` allows also to talk directly to :manpage:`harpd(8)` instances, to
+provide enough tools for scenarios when running :manpage:`harpcallerd(8)`
+would be too expensive or troublesome. This part of the API is synchronous, so
+all calls block until the called remote procedure finishes.
 
 
 .. _client-lib-api:
