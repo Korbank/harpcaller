@@ -1,9 +1,5 @@
 #!/usr/bin/make -f
 
-SPHINX_DOCTREE = documentation/doctrees
-SPHINX_SOURCE = documentation
-SPHINX_OUTPUT = documentation/html
-
 #-----------------------------------------------------------------------------
 
 .PHONY: default help
@@ -41,18 +37,19 @@ harp-clean daemon-clean dispatcher-clean:
 
 #-----------------------------------------------------------------------------
 
-.PHONY: doc html doc-install doc-clean
-doc: html
+.PHONY: doc html man doc-install doc-clean
+doc: html man
 
-html:
-	sphinx-build -b html -d $(SPHINX_DOCTREE) $(SPHINX_SOURCE) $(SPHINX_OUTPUT)
-
-doc-install:
-	mkdir -p $(DESTDIR)/usr/share/doc/harpcaller/html
-	cp -R $(SPHINX_OUTPUT)/* $(DESTDIR)/usr/share/doc/harpcaller/html
+html man:
+	$(MAKE) -C documentation $@
 
 doc-clean:
-	rm -rf $(SPHINX_DOCTREE) $(SPHINX_OUTPUT)
+	$(MAKE) -C documentation clean
+
+doc-install:
+	mkdir -p $(DESTDIR)/usr/share/doc/harpcaller
+	mkdir -p $(DESTDIR)/usr/share/doc/harpcaller/html
+	cp -R documentation/html/* $(DESTDIR)/usr/share/doc/harpcaller/html
 
 #-----------------------------------------------------------------------------
 # vim:ft=make
