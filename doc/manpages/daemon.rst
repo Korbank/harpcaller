@@ -1,21 +1,29 @@
-*********************
-Operating Harp daemon
-*********************
+***************
+Harp RPC server
+***************
 
 .. program:: harpd
 
-Command line
-============
-
-Usage
------
+Synopsis
+========
 
 .. code-block:: none
 
     harpd [options]
 
-Available options
------------------
+
+Description
+===========
+
+*harpd* is a daemon that on incoming request executes a procedure from
+a predefined set and returns its result to the sender. In other words, it's
+a generic RPC server. The procedures that can be executed are provided as
+a part of daemon's configuration, making *harpd* a convenient tool for running
+administrative tasks on a server.
+
+
+Command line options
+====================
 
 .. option:: -c FILE, --config=FILE
 
@@ -187,6 +195,7 @@ processes is a little tangled, so don't depend on :meth:`__del__()` method.
 
 .. _harpd-auth-modules:
 
+
 Auth database backends
 ======================
 
@@ -194,3 +203,8 @@ Auth database backends
 
 .. automodule:: harpd.auth.inconfig
 
+
+See Also
+========
+
+* :manpage:`harpcallerd(8)`

@@ -1,14 +1,9 @@
-***************************
-Operating HarpCaller daemon
-***************************
+*****************
+HarpCaller daemon
+*****************
 
-Command line
-============
-
-Usage
------
-
-Controlling the daemon (:ref:`ref <harpcaller-daemon>`):
+Synopsis
+========
 
 .. code-block:: none
 
@@ -18,32 +13,37 @@ Controlling the daemon (:ref:`ref <harpcaller-daemon>`):
     harpcallerd [options] reload-config
     harpcallerd [options] dist-erl-start
     harpcallerd [options] dist-erl-stop
-
-Controlling call jobs (:ref:`ref <harpcaller-jobs>`):
-
-.. code-block:: none
-
     harpcallerd [options] list
     harpcallerd [options] info <job-id>
     harpcallerd [options] cancel <job-id>
     harpcallerd [options] queue-list
     harpcallerd [options] queue-list <queue-name>
     harpcallerd [options] queue-cancel <queue-name>
-
-Hosts registry (:ref:`ref <harpcaller-hosts>`):
-
-.. code-block:: none
-
     harpcallerd [options] hosts-list
     harpcallerd [options] hosts-refresh
-
-Log handling/rotation (:ref:`ref <harpcaller-logs>`):
-
-.. code-block:: none
-
     harpcallerd [options] prune-jobs
     harpcallerd [options] reopen-logs
 
+
+Description
+===========
+
+HarpCaller daemon is a service that hails remote :manpage:`harpd(8)`
+instances and records procedures that were called, their arguments, and
+returned results, what allows to check the result of a call at a later time.
+
+HarpCaller was intended mainly for being a call dispatcher and result database
+for a web application, where waiting for a remote procedure to finish in
+a HTTP request is unfeasible. Thus, HarpCaller essentially converts an
+asynchronous call that comes from an application into synchronous
+communication with :manpage:`harpd(8)`.
+
+HarpCaller incorporates a flexible request queueing mechanism, which helps in
+avoiding overloading the servers or resources they use.
+
+
+Usage
+=====
 
 Commands
 --------
@@ -421,3 +421,8 @@ A single JSON hash could look like this (broken down for reading convenience):
       }
     }
 
+
+See Also
+========
+
+* :manpage:`harpd(8)`
