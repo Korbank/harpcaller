@@ -425,4 +425,5 @@ A single JSON hash could look like this (broken down for reading convenience):
 See Also
 ========
 
+* :manpage:`harp(3)`
 * :manpage:`harpd(8)`

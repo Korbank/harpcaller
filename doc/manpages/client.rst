@@ -80,3 +80,9 @@ Python interface
 
 .. automodule:: harp
 
+
+See Also
+========
+
+* :manpage:`harpd(8)`
+* :manpage:`harpcallerd(8)`

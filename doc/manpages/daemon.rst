@@ -207,4 +207,5 @@ Auth database backends
 See Also
 ========
 
+* :manpage:`harp(3)`
 * :manpage:`harpcallerd(8)`
