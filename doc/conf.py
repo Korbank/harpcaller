@@ -63,6 +63,8 @@ man_pages = [
      [], 8),
     ('manpages/dispatcher', 'harpcallerd', 'HarpCaller broker daemon',
      [], 8),
+    ('overview', 'harpcaller', 'HarpCaller system overview',
+     [], 7),
 ]
 
 #man_show_urls = False

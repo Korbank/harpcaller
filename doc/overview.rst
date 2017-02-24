@@ -5,6 +5,9 @@ High-level system overview
 .. toctree::
    :maxdepth: 2
 
+Description
+===========
+
 HarpCaller is a system that allows calling procedures on remote machines and
 collects their results of various types. Procedures to be called are part of
 system's configuration, so they can do many administrative tasks. This is much
@@ -75,3 +78,51 @@ Module documentation: :ref:`client-lib-api`
 
 Example usage: :ref:`client-lib-examples`
 
+
+Using HarpCaller
+================
+
+**TODO**: write this section; plan:
+
+* calling a host
+
+  * checking job's status (finished, proc/host/args, timestamps)
+  * job from job ID
+  * *end result* and *streamed result*
+  * ``stream()`` vs. ``follow()``
+
+    * stream ends silently; check *end result* for success/failure
+
+  * ``get()`` vs. ``result()``
+  * ``timeout`` and ``max_exec_time``
+
+* queues
+
+  * name
+  * concurrency level
+  * per-host, per-procedure, other ways of organization
+
+* where HarpCaller gets its hosts list (addrs, ports, credentials) from
+
+
+Using :manpage:`harpd(8)`
+=========================
+
+**TODO**: write this section; plan:
+
+* calling a host
+
+  * streamed vs. non-streamed result
+  * streamed result: end result detection
+
+    * stream raises an exception on reported error
+
+  * important note: don't confuse :class:`harp.Result` with :class:`harpd.proc.Result`
+
+
+See Also
+========
+
+* :manpage:`harp(3)`
+* :manpage:`harpd(8)`
+* :manpage:`harpcallerd(8)`
