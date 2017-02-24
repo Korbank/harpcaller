@@ -19,7 +19,7 @@ extensions = ['sphinx.ext.autodoc', 'sphinx.ext.todo']
 
 master_doc = 'index'
 source_suffix = '.rst'
-exclude_trees = ['html']
+exclude_trees = ['html', 'man']
 
 #-----------------------------------------------------------------------------
 # configuration specific to Python code
@@ -51,6 +51,19 @@ else:
 pygments_style = 'sphinx'
 
 #html_static_path = ['static']
+
+#-----------------------------------------------------------------------------
+# TROFF/man output
+#-----------------------------------------------------------------------------
+
+man_pages = [
+    ('manpages/daemon', 'harpd', 'Harp RPC server',
+     [], 8),
+    ('manpages/dispatcher', 'harpcallerd', 'HarpCaller broker daemon',
+     [], 8),
+]
+
+#man_show_urls = False
 
 #-----------------------------------------------------------------------------
 # vim:ft=python

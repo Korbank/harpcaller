@@ -9,11 +9,9 @@ Table of contents
    :maxdepth: 2
 
    overview
-   client/api
-   dispatcher/operations
-   daemon/operations
+   manpages/index
    installation
-   internals
+   internals/index
    glossary
 
 

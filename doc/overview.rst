@@ -35,8 +35,8 @@ or procedure's arguments, so it is possible to issue the same call request
 twice or more, each time to a different queue.
 
 
-System architecture
-===================
+Components of the system
+========================
 
 HarpCaller system is divided into three parts: daemon, dispatcher, and client
 library.
