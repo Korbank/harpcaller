@@ -69,7 +69,7 @@ need to add this one.
 
 Authentication specifies a field ``"module"``, which is a name of a Python
 module that will be used to authenticate requests. See
-:ref:`harpd-auth-modules` for list of modules shipped with :program:`harpd`.
+:ref:`harpd-auth-modules` for list of modules shipped with *harpd*.
 
 Python environment may specify additional module locations. To do this, config
 should contain ``python.path`` variable. The simplest form is either a single
@@ -83,7 +83,7 @@ loading authentication module. This mechanism may be used to keep any
 additional libraries in a place different than Python's usual module search
 path.
 
-Configuration for :program:`harpd` should look like this (YAML):
+Configuration for *harpd* should look like this (YAML):
 
 .. code-block:: yaml
 
@@ -120,8 +120,8 @@ more detail about how logging works, see:
 * Configuring :mod:`logging` with dictionary:
   `<https://docs.python.org/2/library/logging.config.html#logging-config-dictschema>`_
 
-If no logging configuration file was specified, :program:`harpd` defaults to
-log to *STDERR*.
+If no logging configuration file was specified, *harpd* defaults to log to
+*STDERR*.
 
 Logging configuration could look like following:
 

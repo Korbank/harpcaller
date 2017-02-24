@@ -44,7 +44,7 @@ library.
 Daemon
 ------
 
-:program:`harpd` daemon is a service running on every server that can be
+:manpage:`harpd(8)` daemon is a service running on every server that can be
 a target for RPC call. It is meant to carry out any procedure that is called
 and send the value that the procedure returned as a response to RPC call. Code
 for the procedures available to daemon is supplied as daemon's configuration.
@@ -66,10 +66,10 @@ Client library
 --------------
 
 Python :mod:`harp` module is a client implementation of the protocol to talk
-to HarpCaller and to :program:`harpd` services (*note*: :program:`harpd` uses
-slightly different protocol). The primary use case for this interface was to
-allow issuing commands to servers from within a web application, but it should
-be equally convenient for other uses.
+to HarpCaller and to :manpage:`harpd(8)` services (*note*: :manpage:`harpd(8)`
+uses slightly different protocol). The primary use case for this interface was
+to allow issuing commands to servers from within a web application, but it
+should be equally convenient for other uses.
 
 Module documentation: :ref:`client-lib-api`
 

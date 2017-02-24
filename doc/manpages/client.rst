@@ -37,8 +37,8 @@ HarpCaller interaction
        print "cancelled"
    elif ...
 
-:program:`harpd` interaction
-----------------------------
+:manpage:`harpd(8)` interaction
+-------------------------------
 
 .. code-block:: python
 

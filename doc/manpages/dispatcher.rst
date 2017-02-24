@@ -328,13 +328,13 @@ Main section
 
 ``ca_file``, ``known_certs_file``
    These two parameters control how HarpCaller will verify called
-   :program:`harpd`.
+   :manpage:`harpd(8)`.
 
-   If ``ca_file`` is specified, :program:`harpd`'s certificate needs to be
+   If ``ca_file`` is specified, :manpage:`harpd(8)` certificate needs to be
    signed properly by one of the CAs from the file (or a sub-CA, with proper
    certificate chain). *commonName* attribute is not verified yet.
 
-   If ``known_certs_file`` is specified, :program:`harpd`'s certificate needs
+   If ``known_certs_file`` is specified, :manpage:`harpd(8)` certificate needs
    to be whitelisted in this file.
 
    If both files are specified, a certificate satisfying any of the above
