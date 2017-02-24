@@ -41,15 +41,15 @@ harp-clean daemon-clean dispatcher-clean:
 doc: html man
 
 html man:
-	$(MAKE) -C documentation $@
+	$(MAKE) -C doc $@
 
 doc-clean:
-	$(MAKE) -C documentation clean
+	$(MAKE) -C doc clean
 
 doc-install:
 	mkdir -p $(DESTDIR)/usr/share/doc/harpcaller
 	mkdir -p $(DESTDIR)/usr/share/doc/harpcaller/html
-	cp -R documentation/html/* $(DESTDIR)/usr/share/doc/harpcaller/html
+	cp -R doc/html/* $(DESTDIR)/usr/share/doc/harpcaller/html
 
 #-----------------------------------------------------------------------------
 # vim:ft=make
