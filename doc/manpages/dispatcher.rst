@@ -60,7 +60,7 @@ Following option is common to all the commands in later sections:
 .. option:: --socket=PATH
 
    Path to controlling socket, through which administrative commands can be
-   sent. Defaults to :file:`/var/run/harpcaller/harpcaller.sock`.
+   sent. Defaults to :file:`/var/run/harpcaller/control`.
 
 .. _harpcaller-daemon:
 
