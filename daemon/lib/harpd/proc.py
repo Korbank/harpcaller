@@ -124,9 +124,10 @@ class Procedure(object):
     '''
     :param function: function to wrap
     :type function: callable
-    :param timeout:
-    :param uid:
-    :param gid:
+    :param timeout: time after which *SIGXCPU* will be sent to the process
+        executing the function
+    :param uid: user to run the function as
+    :param gid: group to run the function as
 
     Simple callable wrapper over a function.
     '''
@@ -146,6 +147,7 @@ class Procedure(object):
         return self.function(*args, **kwargs)
 
 def procedure(function = None, timeout = None, uid = None, gid = None):
+    # NOTE: documented in module-level docstring
     def wrapper(function):
         return Procedure(function, timeout = timeout, uid = uid, gid = gid)
 
@@ -160,6 +162,10 @@ class StreamingProcedure(Procedure):
     '''
     :param function: function to wrap
     :type function: callable
+    :param timeout: time after which *SIGXCPU* will be sent to the process
+        executing the function
+    :param uid: user to run the function as
+    :param gid: group to run the function as
 
     Callable wrapper over a function that produces streamed response using
     ``yield``.
@@ -194,6 +200,7 @@ class StreamingProcedure(Procedure):
 
 def streaming_procedure(function = None, timeout = None,
                         uid = None, gid = None):
+    # NOTE: documented in module-level docstring
     def wrapper(function):
         return StreamingProcedure(function, timeout = timeout,
                                   uid = uid, gid = gid)
