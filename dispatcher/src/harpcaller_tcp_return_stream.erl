@@ -293,40 +293,10 @@ format_result({error, {Type, Message, Data}} = _Result)
 when is_binary(Type), is_binary(Message) ->
   [{<<"error">>,
     [{<<"type">>, Type}, {<<"message">>, Message}, {<<"data">>, Data}]}];
-format_result({error, unknown_host} = _Result) ->
-  [{<<"error">>, [
-    {<<"type">>, <<"unknown_host">>},
-    {<<"message">>, <<"host unknown">>}
-  ]}];
-format_result({error, timeout} = _Result) ->
-  [{<<"error">>, [
-    {<<"type">>, <<"timeout">>},
-    {<<"message">>, <<"request timed out">>}
-  ]}];
-format_result({error, closed} = _Result) ->
-  [{<<"error">>, [
-    {<<"type">>, <<"closed">>},
-    {<<"message">>, <<"connection closed unexpectedly">>}
-  ]}];
-format_result({error, {ssl, Reason}} = _Result) ->
-  [{<<"error">>, [
-    {<<"type">>, <<"ssl">>},
-    {<<"message">>, list_to_binary(ssl:format_error(Reason))}
-  ]}];
-format_result({error, Reason} = _Result) when is_atom(Reason) ->
-  [{<<"error">>, [
-    {<<"type">>, atom_to_binary(Reason, utf8)},
-    {<<"message">>, list_to_binary(inet:format_error(Reason))}
-  ]}];
 format_result({error, Reason} = _Result) ->
-  % XXX: this can be an error coming from `ssl' application, like certificate
-  % verification error
-  [{<<"error">>, [
-    {<<"type">>, <<"unrecognized">>},
-    % hopefully 1024 chars will be enough; if not, pity, it's still serialized
-    % to JSON
-    {<<"message">>, iolist_to_binary(io_lib:format("~1024p", [Reason]))}
-  ]}];
+  Type = iolist_to_binary(harpcaller_caller:error_type(Reason)),
+  Message = iolist_to_binary(harpcaller_caller:format_error(Reason)),
+  [{<<"error">>, [{<<"type">>, Type}, {<<"message">>, Message}]}];
 format_result(undefined = _Result) ->
   % no such job
   format_result({error, {<<"invalid_jobid">>, <<"no job with this ID">>}}).

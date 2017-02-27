@@ -15,6 +15,7 @@
 -export([call/3, call/4, locate/1]).
 -export([cancel/1, get_result/1, follow_stream/1, get_call_info/1]).
 -export([job_id/1]).
+-export([format_error/1, error_type/1]).
 
 %% supervision tree API
 -export([start/4, start_link/4]).
@@ -592,6 +593,28 @@ ensure_binary(Name) when is_list(Name) ->
   list_to_binary(Name);
 ensure_binary(Name) when is_binary(Name) ->
   Name.
+
+%%%---------------------------------------------------------------------------
+
+%% @doc Convert an error to a printable form.
+
+-spec format_error(term()) ->
+  iolist().
+
+format_error(unknown_host = _Error) ->
+  "host unknown";
+format_error(Error) ->
+  harp:format_error(Error).
+
+%% @doc Determine error category.
+
+-spec error_type(term()) ->
+  string().
+
+error_type(unknown_host = _Error) ->
+  "unknown_host";
+error_type(Error) ->
+  harp:error_type(Error).
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

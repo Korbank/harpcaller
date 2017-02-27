@@ -8,6 +8,7 @@
 
 -export([call/3]).
 -export([request/3, recv/1, recv/2, cancel/1, controlling_process/2]).
+-export([format_error/1, error_type/1]).
 
 -export_type([procedure/0, argument/0]).
 -export_type([stream_record/0, result/0, error_description/0]).
@@ -84,7 +85,7 @@ call(Procedure, Arguments, Options) when is_binary(Procedure) ->
           {ok, Result};
         {ok, [{<<"exception">>, ExceptionDesc}]} ->
           ssl_close(Conn),
-          case format_error(ExceptionDesc) of
+          case format_protocol_error(ExceptionDesc) of
             {_,_,_} = Exception -> {exception, Exception};
             {_,_}   = Exception -> {exception, Exception};
             _ -> {error, bad_protocol}
@@ -177,7 +178,7 @@ send_request_3(Conn, Acknowledgement) ->
       {ok, Conn, single_return};
     %{"harp": 1, "error": {"type": "...", "message": "...", "data": ...}}
     [{<<"error">>, ErrorDesc}, {<<"harp">>, 1}] ->
-      case format_error(ErrorDesc) of
+      case format_protocol_error(ErrorDesc) of
         {_,_,_} = Error -> {error, Error};
         {_,_}   = Error -> {error, Error};
         % TODO: info what was returned
@@ -242,14 +243,14 @@ recv(Handle, Timeout) ->
       {result, Result};
     {ok, [{<<"error">>, ErrorDescription}, {<<"harp">>, 1}]} ->
       ssl_close(Handle),
-      case format_error(ErrorDescription) of
+      case format_protocol_error(ErrorDescription) of
         {_,_,_} = Error -> {error, Error};
         {_,_}   = Error -> {error, Error};
         _ -> {error, bad_protocol}
       end;
     {ok, [{<<"exception">>, ExceptionDesc}]} ->
       ssl_close(Handle),
-      case format_error(ExceptionDesc) of
+      case format_protocol_error(ExceptionDesc) of
         {_,_,_} = Exception -> {exception, Exception};
         {_,_}   = Exception -> {exception, Exception};
         _ -> {error, bad_protocol}
@@ -379,18 +380,56 @@ ssl_recv(Conn, Timeout) ->
 
 %% @doc Format error/exception description from HarpRPC protocol.
 
--spec format_error(term()) ->
+-spec format_protocol_error(term()) ->
   error_description() | bad_format.
 
-format_error([{<<"data">>, Data}, {<<"message">>, Message},
-               {<<"type">>, Type}] = _ErrorDesc)
+format_protocol_error([{<<"data">>, Data}, {<<"message">>, Message},
+                       {<<"type">>, Type}] = _ErrorDesc)
 when is_binary(Type), is_binary(Message) ->
   {Type, Message, Data};
-format_error([{<<"message">>, Message}, {<<"type">>, Type}] = _ErrorDesc)
+format_protocol_error([{<<"message">>, Message},
+                       {<<"type">>, Type}] = _ErrorDesc)
 when is_binary(Type), is_binary(Message) ->
   {Type, Message};
-format_error(_ErrorDesc) ->
+format_protocol_error(_ErrorDesc) ->
   bad_format.
+
+%%%---------------------------------------------------------------------------
+
+%% @doc Convert an error to a printable form.
+
+-spec format_error(term()) ->
+  iolist().
+
+format_error(bad_protocol = _Error) ->
+  "Harp protocol error";
+format_error(bad_format = _Error) ->
+  % error was signaled by the remote harpd in wrong way
+  "Harp protocol error";
+format_error(badarg = _Error) ->
+  % data to send (e.g. arguments or procedure name) can't be encoded to JSON
+  "bad argument"; % TODO: be more descriptive
+format_error({ssl, Reason} = _Error) ->
+  ssl:format_error(Reason);
+format_error(timeout = _Error) ->
+  "request timed out";
+format_error(closed = _Error) ->
+  "connection closed unexpectedly";
+format_error(Error) when is_atom(Error) ->
+  inet:format_error(Error);
+format_error(Error) ->
+  io_lib:format("unknown error: ~1024p", [Error]).
+
+%% @doc Determine error category.
+
+-spec error_type(term()) ->
+  string().
+
+error_type({ssl, _} = _Error) -> "ssl";
+error_type(timeout = _Error) -> "timeout";
+error_type(closed = _Error) -> "closed";
+error_type(Error) when is_atom(Error) -> atom_to_list(Error); % inet:posix()
+error_type(_Error) -> "unrecognized".
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker
