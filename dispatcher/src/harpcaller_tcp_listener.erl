@@ -64,10 +64,12 @@ init([Addr, Port] = _Args) ->
           State = #state{socket = Socket},
           {ok, State, 0};
         {error, Reason} ->
+          harpcaller_log:err("TCP listen error", [{reason, {term, Reason}}]),
           {stop, Reason}
       end;
     {error, Reason} ->
-      harpcaller_log:err("TCP listen error", [{reason, {term, Reason}}]),
+      harpcaller_log:err("TCP listen address resolve error",
+                         [{reason, {term, Reason}}]),
       {stop, Reason}
   end.
 
