@@ -307,7 +307,8 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
               harp_sdb:set_result(StreamTable, {error, Reason}),
               % request itself failed, but the job was carried successfully;
               % tell the parent that that part got done
-              {stop, {call, Reason}, FilledState}
+              % TODO: flush `follow' requests
+              {stop, normal, FilledState}
           end;
         {QueueName, Concurrency} ->
           % enqueue and wait for a message
@@ -388,7 +389,8 @@ handle_info({go, QRef} = _Message,
       harp_sdb:set_result(StreamTable, {error, Reason}),
       % request itself failed, but the job was carried successfully;
       % tell the parent that that part got done
-      {stop, {call, Reason}, State}
+      % TODO: flush `follow' requests
+      {stop, normal, State}
   end;
 
 handle_info(timeout = _Message, State = #state{call = {queued, _QRef}}) ->

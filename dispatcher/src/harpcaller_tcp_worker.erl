@@ -249,7 +249,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       {noreply, State, 0};
     {error, Reason} ->
       harpcaller_log:warn("request reading error", [{reason, {term, Reason}}]),
-      {stop, Reason, State}
+      {stop, normal, State}
   end;
 
 %% unknown messages

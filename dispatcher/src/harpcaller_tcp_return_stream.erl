@@ -108,8 +108,7 @@ handle_info({record, JobID, Id, Record} = _Message,
             State = #state{job_id = JobID}) ->
   case send_response(State, [{<<"packet">>, Id}, {<<"data">>, Record}]) of
     ok -> {noreply, State};
-    {error, closed} -> {stop, normal, State};
-    {error, Reason} -> {stop, Reason, State}
+    {error, _Reason} -> {stop, normal, State}
   end;
 
 handle_info({'DOWN', Monitor, process, Pid, Reason} = _Message,
@@ -167,7 +166,7 @@ handle_info(timeout = _Message,
           harpcaller_log:warn("reading job's recorded data failed",
                               [{reason, {term, Reason}}]),
           send_response(State, format_result({error, Reason})),
-          {stop, Reason, State}
+          {stop, normal, State}
       end;
     #state{mode = read} ->
       harpcaller_log:append_context([{wait, false}]),
