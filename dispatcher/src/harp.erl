@@ -320,8 +320,17 @@ ssl_connect(Host, Port, CAFile, CertVerifyFun, Timeout) ->
   case ssl:connect(Host, Port, CertOpts ++ SocketOpts, Timeout) of
     {ok, Conn} ->
       {ok, Conn};
+    {error, closed = Reason} ->
+      {error, Reason};
+    {error, timeout = Reason} ->
+      {error, Reason};
+    {error, Reason} when is_atom(Reason) ->
+      case inet:format_error(Reason) of
+        "unknown POSIX" ++ _ -> {error, {ssl, Reason}};
+        _ -> {error, Reason}
+      end;
     {error, Reason} ->
-      {error, Reason}
+      {error, {ssl, Reason}}
   end.
 
 %% @doc Close the SSL socket.
