@@ -290,6 +290,11 @@ controlling_process(Handle, Pid) ->
                   {fun(), term()}, timeout()) ->
   {ok, ssl:sslsocket()} | {error, term()}.
 
+ssl_connect(_Host, Port, _CAFile, _CertVerifyFun, _Timeout)
+when not is_integer(Port); Port =< 0; Port >= 65536 ->
+  % if we left validating port number to `ssl:connect()' in the actual call,
+  % invalid port would result in a completely unreadable error
+  {error, bad_address};
 ssl_connect(Host, Port, CAFile, CertVerifyFun, Timeout) ->
   case {CAFile, CertVerifyFun} of
     {undefined, undefined} ->
@@ -318,20 +323,42 @@ ssl_connect(Host, Port, CAFile, CertVerifyFun, Timeout) ->
     {active, false},
     {packet, line}
   ],
-  case ssl:connect(Host, Port, CertOpts ++ SocketOpts, Timeout) of
-    {ok, Conn} ->
-      {ok, Conn};
-    {error, closed = Reason} ->
-      {error, Reason};
-    {error, timeout = Reason} ->
-      {error, Reason};
-    {error, Reason} when is_atom(Reason) ->
-      case inet:format_error(Reason) of
-        "unknown POSIX" ++ _ -> {error, {ssl, Reason}};
-        _ -> {error, Reason}
+  % if we left host resolution to `ssl:connect()', incorrectly formatted
+  % hostname/IP address would result in a completely unreadable error
+  case resolve(Host) of
+    {ok, Addr} ->
+      case ssl:connect(Addr, Port, CertOpts ++ SocketOpts, Timeout) of
+        {ok, Conn} ->
+          {ok, Conn};
+        {error, closed = Reason} ->
+          {error, Reason};
+        {error, timeout = Reason} ->
+          {error, Reason};
+        {error, Reason} when is_atom(Reason) ->
+          case inet:format_error(Reason) of
+            "unknown POSIX" ++ _ -> {error, {ssl, Reason}};
+            _ -> {error, Reason}
+          end;
+        {error, Reason} ->
+          {error, {ssl, Reason}}
       end;
+    {error, einval} ->
+      {error, bad_address};
     {error, Reason} ->
-      {error, {ssl, Reason}}
+      {error, Reason}
+  end.
+
+%% @doc Resolve host address.
+
+-spec resolve(inet:hostname()) ->
+  {ok, inet:ip_address()} | {error, term()}.
+
+resolve(Host) ->
+  case inet:getaddr(Host, inet) of
+    {ok, Addr} -> {ok, Addr};
+    {error, nxdomain} -> inet:getaddr(Host, inet6);
+    {error, eafnosupport} -> inet:getaddr(Host, inet6);
+    {error, Reason} -> {error, Reason}
   end.
 
 %% @doc Close the SSL socket.
@@ -401,6 +428,8 @@ format_protocol_error(_ErrorDesc) ->
 -spec format_error(term()) ->
   iolist().
 
+format_error(bad_address = _Error) ->
+  "invalid host address or port number";
 format_error(bad_protocol = _Error) ->
   "Harp protocol error";
 format_error(bad_format = _Error) ->
