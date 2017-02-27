@@ -208,22 +208,22 @@ get_call_info(JobID) ->
 %% @private
 %% @doc Start caller process.
 
-start(Procedure, ProcArgs, Host, Options) ->
+start(Proc, ProcArgs, Host, Options) ->
   {ok, Pid} = gen_server:start(?MODULE, [], []),
-  % make the process crash on severe operational error (SDB opening error)
-  {ok, JobID} =
-    gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Options}),
-  {ok, Pid, JobID}.
+  case gen_server:call(Pid, {start_call, Proc, ProcArgs, Host, Options}) of
+    {ok, JobID} -> {ok, Pid, JobID};
+    {error, Reason} -> {error, Reason}
+  end.
 
 %% @private
 %% @doc Start caller process.
 
-start_link(Procedure, ProcArgs, Host, Options) ->
+start_link(Proc, ProcArgs, Host, Options) ->
   {ok, Pid} = gen_server:start_link(?MODULE, [], []),
-  % make the process crash on severe operational error (SDB opening error)
-  {ok, JobID} =
-    gen_server:call(Pid, {start_call, Procedure, ProcArgs, Host, Options}),
-  {ok, Pid, JobID}.
+  case gen_server:call(Pid, {start_call, Proc, ProcArgs, Host, Options}) of
+    {ok, JobID} -> {ok, Pid, JobID};
+    {error, Reason} -> {error, Reason}
+  end.
 
 %%%---------------------------------------------------------------------------
 %%% gen_server callbacks
@@ -601,6 +601,8 @@ ensure_binary(Name) when is_binary(Name) ->
 -spec format_error(term()) ->
   iolist().
 
+format_error({open, Reason} = _Error) ->
+  ["can't open call record file: ", file:format_error(Reason)];
 format_error(unknown_host = _Error) ->
   "host unknown";
 format_error(Error) ->
@@ -611,6 +613,8 @@ format_error(Error) ->
 -spec error_type(term()) ->
   string().
 
+error_type({open, _} = _Error) ->
+  "storage_error";
 error_type(unknown_host = _Error) ->
   "unknown_host";
 error_type(Error) ->
