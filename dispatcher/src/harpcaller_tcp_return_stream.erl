@@ -115,7 +115,7 @@ handle_info({'DOWN', Monitor, process, Pid, Reason} = _Message,
             State = #state{job_monitor = Monitor}) ->
   % the process carrying out the job died
   harpcaller_log:info("job died",
-                      [{pid, {term, Pid}}, {reason, {term, Reason}}]),
+                      [{pid, {term, Pid}}, {error, {term, Reason}}]),
   send_response(State, format_result(missing)),
   {stop, normal, State};
 
@@ -164,7 +164,7 @@ handle_info(timeout = _Message,
           end;
         {error, Reason} ->
           harpcaller_log:warn("reading job's recorded data failed",
-                              [{reason, {term, Reason}}]),
+                              [{error, {term, Reason}}]),
           send_response(State, format_result({error, Reason})),
           {stop, normal, State}
       end;

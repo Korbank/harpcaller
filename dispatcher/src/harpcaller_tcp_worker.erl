@@ -219,7 +219,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
             ]}
           ]);
         {error, Reason} -> % `Reason' is a binary
-          harpcaller_log:warn("job status reading error", [{reason, Reason}]),
+          harpcaller_log:warn("job status reading error", [{error, Reason}]),
           send_response(Socket, [
             {<<"error">>, [
               {<<"type">>, <<"unrecognized">>},
@@ -248,7 +248,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
       % yield for next system message if any awaits our attention
       {noreply, State, 0};
     {error, Reason} ->
-      harpcaller_log:warn("request reading error", [{reason, {term, Reason}}]),
+      harpcaller_log:warn("request reading error", [{error, {term, Reason}}]),
       {stop, normal, State}
   end;
 

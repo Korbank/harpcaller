@@ -64,12 +64,12 @@ init([Addr, Port] = _Args) ->
           State = #state{socket = Socket},
           {ok, State, 0};
         {error, Reason} ->
-          harpcaller_log:err("TCP listen error", [{reason, {term, Reason}}]),
+          harpcaller_log:err("TCP listen error", [{error, {term, Reason}}]),
           {stop, Reason}
       end;
     {error, Reason} ->
       harpcaller_log:err("TCP listen address resolve error",
-                         [{reason, {term, Reason}}]),
+                         [{error, {term, Reason}}]),
       {stop, Reason}
   end.
 
@@ -111,7 +111,7 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
     {error, timeout} ->
       {noreply, State, 0};
     {error, Reason} ->
-      harpcaller_log:err("accept error", [{reason, {term, Reason}}]),
+      harpcaller_log:err("accept error", [{error, {term, Reason}}]),
       {stop, Reason}
   end;
 

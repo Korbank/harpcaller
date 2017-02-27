@@ -303,7 +303,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
               },
               {noreply, NewState, 0};
             {error, Reason} ->
-              harpcaller_log:warn("call failed", [{reason, {term, Reason}}]),
+              harpcaller_log:warn("call failed", [{error, {term, Reason}}]),
               harp_sdb:set_result(StreamTable, {error, Reason}),
               % request itself failed, but the job was carried successfully;
               % tell the parent that that part got done
@@ -385,7 +385,7 @@ handle_info({go, QRef} = _Message,
       },
       {noreply, NewState, 0};
     {error, Reason} ->
-      harpcaller_log:warn("call failed", [{reason, {term, Reason}}]),
+      harpcaller_log:warn("call failed", [{error, {term, Reason}}]),
       harp_sdb:set_result(StreamTable, {error, Reason}),
       % request itself failed, but the job was carried successfully;
       % tell the parent that that part got done
@@ -442,7 +442,7 @@ handle_info(timeout = _Message,
     {error, Reason} ->
       notify_followers(State, {terminated, JobID, {error, Reason}}),
       harpcaller_log:warn("job finished abnormally",
-                          [{reason, {term, Reason}}]),
+                          [{error, {term, Reason}}]),
       ok = harp_sdb:set_result(StreamTable, {error, Reason}),
       {stop, normal, State}
   end;
