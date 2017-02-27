@@ -184,15 +184,20 @@ format_result({error, unknown_host} = _Result) ->
     {<<"type">>, <<"unknown_host">>},
     {<<"message">>, <<"host unknown">>}
   ]}];
+format_result({error, timeout} = _Result) ->
+  [{<<"error">>, [
+    {<<"type">>, <<"timeout">>},
+    {<<"message">>, <<"request timed out">>}
+  ]}];
 format_result({error, closed} = _Result) ->
   [{<<"error">>, [
     {<<"type">>, <<"closed">>},
     {<<"message">>, <<"connection closed unexpectedly">>}
   ]}];
-format_result({error, esslconnect} = _Result) ->
+format_result({error, {ssl, Reason}} = _Result) ->
   [{<<"error">>, [
-    {<<"type">>, <<"esslconnect">>},
-    {<<"message">>, <<"server certificate verification failed">>}
+    {<<"type">>, <<"ssl">>},
+    {<<"message">>, list_to_binary(ssl:format_error(Reason))}
   ]}];
 format_result({error, Reason} = _Result) when is_atom(Reason) ->
   [{<<"error">>, [
