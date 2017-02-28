@@ -68,7 +68,7 @@
   table_name,
   data :: dets:tab_name(),
   stream_counter = 0,
-  finished :: boolean(),
+  mode :: read_write | read,
   holders :: ets:tab()
 }).
 
@@ -398,7 +398,7 @@ init([TableName, Pid | AccessModeAndArgs] = _Args) ->
             stream_counter = Count,
             data = StreamTable,
             holders = HoldersTable,
-            finished = (Mode == read)
+            mode = Mode
           },
           {ok, State};
         {error, Reason} ->
@@ -428,9 +428,9 @@ terminate(_Arg, _State = #state{data = StreamTable, holders = HoldersTable,
 
 handle_call(started = _Request, _From, State = #state{data = StreamTable}) ->
   case State of
-    #state{finished = true} ->
+    #state{mode = read} ->
       ignore;
-    #state{finished = false} ->
+    #state{mode = read_write} ->
       dets:insert(StreamTable, {job_start, timestamp()})
   end,
   {reply, ok, State};
@@ -439,9 +439,9 @@ handle_call(started = _Request, _From, State = #state{data = StreamTable}) ->
 handle_call({add_stream, Record} = _Request, _From,
             State = #state{data = StreamTable, stream_counter = N}) ->
   case State of
-    #state{finished = true} ->
-      NewState = State; % ignore if finished
-    #state{finished = false} ->
+    #state{mode = read} ->
+      NewState = State;
+    #state{mode = read_write} ->
       dets:insert(StreamTable, {N, Record}),
       dets:update_counter(StreamTable, stream_count, 1),
       NewState = State#state{stream_counter = N + 1}
@@ -450,21 +450,23 @@ handle_call({add_stream, Record} = _Request, _From,
 
 %% add record streamed by RPC call
 handle_call({set_result, Result} = _Request, _From,
-            State = #state{data = StreamTable}) ->
+            State = #state{data = StreamTable, holders = HoldersTable}) ->
   % Result :: {return, term()} | cancelled |
   %            {exception, term()} | {error, term()}
   case State of
-    #state{finished = true} ->
-      NewState = State; % ignore if finished
-    #state{finished = false} ->
+    #state{mode = read} ->
+      NewState = State;
+    #state{mode = read_write} ->
+      % switch to read only mode
       dets:insert(StreamTable, {result, Result}),
       dets:insert(StreamTable, {job_end, timestamp()}),
-      NewState = State#state{finished = true}
+      ets:delete(HoldersTable, rw),
+      NewState = State#state{mode = read}
   end,
   {reply, ok, NewState};
 
 %% get result returned by RPC call, if any
-handle_call(get_result = _Request, _From, State = #state{finished = false}) ->
+handle_call(get_result = _Request, _From, State = #state{mode = read_write}) ->
   {reply, still_running, State};
 handle_call(get_result = _Request, _From, State = #state{data = StreamTable}) ->
   Result = case dets:lookup(StreamTable, result) of
@@ -480,9 +482,9 @@ handle_call(get_result = _Request, _From, State = #state{data = StreamTable}) ->
 handle_call({get_stream, Seq} = _Request, _From,
             State = #state{data = StreamTable, stream_counter = N}) ->
   Result = case State of
-    #state{finished = true} when Seq >= N ->
+    #state{mode = read} when Seq >= N ->
       end_of_stream;
-    #state{finished = false} when Seq >= N ->
+    #state{mode = read_write} when Seq >= N ->
       still_running;
     _ when Seq < N ->
       [{Seq, Record}] = dets:lookup(StreamTable, Seq),
@@ -527,7 +529,7 @@ handle_call({close, Pid} = _Request, _From,
   case ets:lookup(HoldersTable, rw) of
     [{rw, Pid}] ->
       ets:delete(HoldersTable, rw),
-      NewState = State#state{finished = true};
+      NewState = State#state{mode = read};
     _ ->
       NewState = State
   end,
@@ -559,7 +561,7 @@ handle_info({'DOWN', MonRef, process, Pid, _} = _Message,
   case ets:lookup(HoldersTable, rw) of
     [{rw, Pid}] ->
       ets:delete(HoldersTable, rw),
-      NewState = State#state{finished = true};
+      NewState = State#state{mode = read};
     _ ->
       NewState = State
   end,
