@@ -426,56 +426,39 @@ terminate(_Arg, _State = #state{data = StreamTable, holders = HoldersTable,
 %% @private
 %% @doc Handle {@link gen_server:call/2}.
 
+handle_call(started = _Request, _From, State = #state{mode = read}) ->
+  {reply, ok, State};
 handle_call(started = _Request, _From, State = #state{data = StreamTable}) ->
-  case State of
-    #state{mode = read} ->
-      ignore;
-    #state{mode = read_write} ->
-      dets:insert(StreamTable, {job_start, timestamp()})
-  end,
+  sdb_mark_started(StreamTable),
   {reply, ok, State};
 
 %% add record streamed by RPC call
+handle_call({add_stream, _} = _Request, _From, State = #state{mode = read}) ->
+  {reply, ok, State};
 handle_call({add_stream, Record} = _Request, _From,
             State = #state{data = StreamTable, stream_counter = N}) ->
-  case State of
-    #state{mode = read} ->
-      NewState = State;
-    #state{mode = read_write} ->
-      dets:insert(StreamTable, {N, Record}),
-      dets:update_counter(StreamTable, stream_count, 1),
-      NewState = State#state{stream_counter = N + 1}
-  end,
+  sdb_add_stream_record(StreamTable, N, Record),
+  NewState = State#state{stream_counter = N + 1},
   {reply, ok, NewState};
 
 %% add record streamed by RPC call
+handle_call({set_result, _} = _Request, _From, State = #state{mode = read}) ->
+  {reply, ok, State};
 handle_call({set_result, Result} = _Request, _From,
             State = #state{data = StreamTable, holders = HoldersTable}) ->
   % Result :: {return, term()} | cancelled |
   %            {exception, term()} | {error, term()}
-  case State of
-    #state{mode = read} ->
-      NewState = State;
-    #state{mode = read_write} ->
-      % switch to read only mode
-      dets:insert(StreamTable, {result, Result}),
-      dets:insert(StreamTable, {job_end, timestamp()}),
-      ets:delete(HoldersTable, rw),
-      NewState = State#state{mode = read}
-  end,
+  % switch to read only mode
+  sdb_set_result(StreamTable, Result),
+  ets:delete(HoldersTable, rw),
+  NewState = State#state{mode = read},
   {reply, ok, NewState};
 
 %% get result returned by RPC call, if any
 handle_call(get_result = _Request, _From, State = #state{mode = read_write}) ->
   {reply, still_running, State};
 handle_call(get_result = _Request, _From, State = #state{data = StreamTable}) ->
-  Result = case dets:lookup(StreamTable, result) of
-    [] -> missing;
-    [{result, {return, R}}]    -> {return, R};
-    [{result, {exception, E}}] -> {exception, E};
-    [{result, {error, E}}]     -> {error, E};
-    [{result, cancelled}] -> cancelled
-  end,
+  Result = sdb_get_result(StreamTable),
   {reply, Result, State};
 
 %% get a record from stream produced by RPC call
@@ -487,8 +470,7 @@ handle_call({get_stream, Seq} = _Request, _From,
     #state{mode = read_write} when Seq >= N ->
       still_running;
     _ when Seq < N ->
-      [{Seq, Record}] = dets:lookup(StreamTable, Seq),
-      {ok, Record}
+      {ok, _Record} = sdb_get_stream_record(StreamTable, Seq)
   end,
   {reply, Result, State};
 
@@ -499,19 +481,7 @@ handle_call(get_stream_size = _Request, _From,
 
 %% get some information about RPC call
 handle_call(get_info = _Request, _From, State = #state{data = StreamTable}) ->
-  [{procedure, {_, _} = CallInfo}] = dets:lookup(StreamTable, procedure),
-  [{host, Host}] = dets:lookup(StreamTable, host),
-  [{job_submitted, SubmitTime}] = dets:lookup(StreamTable, job_submitted),
-  case dets:lookup(StreamTable, job_start) of
-    [{job_start, StartTime}] -> ok;
-    [] -> StartTime = undefined
-  end,
-  case dets:lookup(StreamTable, job_end) of
-    [{job_end, EndTime}] -> ok;
-    [] -> EndTime = undefined
-  end,
-  TimeInfo = {SubmitTime, StartTime, EndTime},
-  Info = {CallInfo, Host, TimeInfo},
+  Info = sdb_get_info(StreamTable),
   {reply, {ok, Info}, State};
 
 %% open a handle to an already opened database
@@ -590,6 +560,14 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%%---------------------------------------------------------------------------
 
+%%----------------------------------------------------------
+%% SDB open/close {{{
+
+%% @doc Open a stream result file according to access mode.
+%%
+%%   Database file opened for writing is automatically initialized with call
+%%   info.
+
 -spec sdb_open(file:filename(), list()) ->
   {ok, StreamTable, StreamCount, Mode} | {error, term()}
   when StreamTable :: dets:tab_name(),
@@ -619,6 +597,11 @@ sdb_open(TableName, AccessModeAndArgs) ->
       {error, Reason}
   end.
 
+%% @doc Initialize the stream result file.
+%%   File opened for write has call info added.
+%%
+%%   Function returns number of stream records in the file.
+
 -spec sdb_init(dets:tab_name(), list()) ->
   non_neg_integer().
 
@@ -636,8 +619,104 @@ sdb_init(StreamTable, [write, Procedure, ProcArgs, RemoteAddress]) ->
   ]),
   StreamCount.
 
+%% @doc Close stream result file.
+
+-spec sdb_close(dets:tab_name()) ->
+  ok.
+
 sdb_close(StreamTable) ->
   dets:close(StreamTable).
+
+%% }}}
+%%----------------------------------------------------------
+%% add records {{{
+
+%% @doc Add "job started" marker to stream result file.
+
+-spec sdb_mark_started(dets:tab_name()) ->
+  ok.
+
+sdb_mark_started(StreamTable) ->
+  dets:insert(StreamTable, {job_start, timestamp()}).
+
+%% @doc Add a stream record to result file.
+
+-spec sdb_add_stream_record(dets:tab_name(), non_neg_integer(),
+                            harp:stream_record()) ->
+  any().
+
+sdb_add_stream_record(StreamTable, N, Record) ->
+  dets:insert(StreamTable, {N, Record}),
+  dets:update_counter(StreamTable, stream_count, 1).
+
+%% @doc Add job's end result record to result file.
+
+-spec sdb_set_result(dets:tab_name(), Result) ->
+  ok
+  when Result :: {return, harp:result()}
+               | cancelled
+               | {exception, harp:error_description()}
+               | {error, harp:error_description() | term()}.
+
+sdb_set_result(StreamTable, Result) ->
+  dets:insert(StreamTable, {result, Result}),
+  dets:insert(StreamTable, {job_end, timestamp()}).
+
+%% }}}
+%%----------------------------------------------------------
+%% read records {{{
+
+%% @doc Read job's end result from result file.
+
+-spec sdb_get_result(dets:tab_name()) ->
+    {return, harp:result()}
+  | {exception, harp:error_description()}
+  | {error, harp:error_description() | term()}
+  | cancelled
+  | missing.
+
+sdb_get_result(StreamTable) ->
+  case dets:lookup(StreamTable, result) of
+    [{result, {return, R}}]    -> {return, R};
+    [{result, {exception, E}}] -> {exception, E};
+    [{result, {error, E}}]     -> {error, E};
+    [{result, cancelled}] -> cancelled;
+    [] -> missing
+  end.
+
+%% @doc Read a stream record from result file.
+
+-spec sdb_get_stream_record(dets:tab_name(), non_neg_integer()) ->
+  {ok, harp:stream_record()} | none.
+
+sdb_get_stream_record(StreamTable, N) ->
+  case dets:lookup(StreamTable, N) of
+    [{N, Record}] -> {ok, Record};
+    [] -> none
+  end.
+
+%% @doc Read job's information from result file.
+
+-spec sdb_get_info(dets:tab_name()) ->
+  {info_call(), address(), info_time()}.
+
+sdb_get_info(StreamTable) ->
+  [{procedure, {_, _} = CallInfo}] = dets:lookup(StreamTable, procedure),
+  [{host, Host}] = dets:lookup(StreamTable, host),
+  [{job_submitted, SubmitTime}] = dets:lookup(StreamTable, job_submitted),
+  case dets:lookup(StreamTable, job_start) of
+    [{job_start, StartTime}] -> ok;
+    [] -> StartTime = undefined
+  end,
+  case dets:lookup(StreamTable, job_end) of
+    [{job_end, EndTime}] -> ok;
+    [] -> EndTime = undefined
+  end,
+  TimeInfo = {SubmitTime, StartTime, EndTime},
+  _Info = {CallInfo, Host, TimeInfo}.
+
+%% }}}
+%%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
 
