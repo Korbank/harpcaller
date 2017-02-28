@@ -690,7 +690,7 @@ sdb_mark_started(StreamTable) ->
   any().
 
 sdb_add_stream_record(StreamTable, N, Record) ->
-  dets:insert(StreamTable, {N, Record}),
+  dets:insert(StreamTable, {N, timestamp(), Record}),
   dets:update_counter(StreamTable, stream_count, 1).
 
 %% @doc Add job's end result record to result file.
@@ -735,7 +735,8 @@ sdb_get_result(StreamTable) ->
 
 sdb_get_stream_record(StreamTable, N) ->
   case dets:lookup(StreamTable, N) of
-    [{N, Record}] -> {ok, Record};
+    [{N, _Timestamp, Record}] -> {ok, Record};
+    [{N, Record}] -> {ok, Record}; % old SDB format
     [] -> none
   end.
 
