@@ -33,7 +33,7 @@
 
 -define(CA_VERIFY_DEPTH, 5).
 
-% }}}
+%%% }}}
 %%%---------------------------------------------------------------------------
 
 %% @doc Call a remote procedure that returns single result.

@@ -37,7 +37,7 @@
 %% String to be serialized. May be an atom, except for `true', `false', and
 %% `null'.
 
-% }}}
+%%% }}}
 %%%---------------------------------------------------------------------------
 
 %% @doc Serialize jsx structure to JSON string.
