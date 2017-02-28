@@ -382,53 +382,25 @@ start_link(TableName, Pid, AccessMode) ->
 init([TableName, Pid | AccessModeAndArgs] = _Args) ->
   case ets:insert_new(?ETS_REGISTRY_TABLE, {TableName, self()}) of
     true ->
-      % TODO: check `TableName' for valid name format
-      {ok, Directory} = application:get_env(stream_directory),
-      Filename = filename:join(Directory, TableName),
-      % prepare monitoring table
-      HoldersTable = ets:new(holders, [bag]),
-      MonRef = monitor(process, Pid),
-      ets:insert(HoldersTable, {Pid, MonRef}),
-      % access mode for DETS table (R/O or R/W)
-      Access = case AccessModeAndArgs of
-        [read] -> read;
-        [write, _, _, _] -> read_write
-      end,
-      case dets:open_file(Filename, [{type, set}, {access, Access}]) of
-        {ok, StreamTable} ->
-          case AccessModeAndArgs of
-            [write, Procedure, ProcArgs, RemoteAddress] ->
-              % additional marker when to (pretend to) close the table
-              ets:insert(HoldersTable, {rw, Pid}),
-              % job metadata
-              dets:insert(StreamTable, [
-                {procedure, {Procedure, ProcArgs}},
-                {host, RemoteAddress},
-                {job_submitted, timestamp()},
-                {stream_count, 0}
-              ]),
-              State = #state{
-                table_name = TableName,
-                stream_counter = 0,
-                data = StreamTable,
-                holders = HoldersTable,
-                finished = false
-              },
-              {ok, State};
-            [read] ->
-              [{stream_count, Count}] = dets:lookup(StreamTable, stream_count),
-              State = #state{
-                table_name = TableName,
-                stream_counter = Count,
-                data = StreamTable,
-                holders = HoldersTable,
-                finished = true
-              },
-              {ok, State}
-          end;
-        {error, {file_error, _, Reason}} ->
-          ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
-          {stop, Reason};
+      case sdb_open(TableName, AccessModeAndArgs) of
+        {ok, StreamTable, Count, Mode} ->
+          % prepare monitoring table
+          HoldersTable = ets:new(holders, [bag]),
+          MonRef = monitor(process, Pid),
+          ets:insert(HoldersTable, {Pid, MonRef}),
+          case Mode of
+            % additional marker when to (pretend to) close the table
+            read_write -> ets:insert(HoldersTable, {rw, Pid});
+            read -> ok
+          end,
+          State = #state{
+            table_name = TableName,
+            stream_counter = Count,
+            data = StreamTable,
+            holders = HoldersTable,
+            finished = (Mode == read)
+          },
+          {ok, State};
         {error, Reason} ->
           ets:delete_object(?ETS_REGISTRY_TABLE, {TableName, self()}),
           {stop, Reason}
@@ -442,7 +414,7 @@ init([TableName, Pid | AccessModeAndArgs] = _Args) ->
 
 terminate(_Arg, _State = #state{data = StreamTable, holders = HoldersTable,
                                 table_name = TableName}) ->
-  dets:close(StreamTable),
+  sdb_close(StreamTable),
   ets:delete(HoldersTable), % should be empty by now
   ets:delete(?ETS_REGISTRY_TABLE, TableName),
   ok.
@@ -613,6 +585,57 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% }}}
 %%----------------------------------------------------------
+
+%%%---------------------------------------------------------------------------
+
+-spec sdb_open(file:filename(), list()) ->
+  {ok, StreamTable, StreamCount, Mode} | {error, term()}
+  when StreamTable :: dets:tab_name(),
+       StreamCount :: non_neg_integer(),
+       Mode :: read_write | read.
+
+sdb_open(TableName, AccessModeAndArgs) ->
+  % TODO: check `TableName' for valid name format
+  {ok, Directory} = application:get_env(stream_directory),
+  Filename = filename:join(Directory, TableName),
+  Access = case AccessModeAndArgs of
+    [write | _] -> read_write;
+    [read | _] -> read
+  end,
+  case filelib:ensure_dir(Filename) of
+    ok ->
+      case dets:open_file(Filename, [{type, set}, {access, Access}]) of
+        {ok, StreamTable} ->
+          StreamCount = sdb_init(StreamTable, AccessModeAndArgs),
+          {ok, StreamTable, StreamCount, Access};
+        {error, {file_error, _, Reason}} ->
+          {error, Reason};
+        {error, Reason} ->
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+-spec sdb_init(dets:tab_name(), list()) ->
+  non_neg_integer().
+
+sdb_init(StreamTable, [read] = _AccessModeAndArgs) ->
+  [{stream_count, StreamCount}] = dets:lookup(StreamTable, stream_count),
+  StreamCount;
+sdb_init(StreamTable, [write, Procedure, ProcArgs, RemoteAddress]) ->
+  StreamCount = 0,
+  % job metadata
+  dets:insert(StreamTable, [
+    {procedure, {Procedure, ProcArgs}},
+    {host, RemoteAddress},
+    {job_submitted, timestamp()},
+    {stream_count, StreamCount}
+  ]),
+  StreamCount.
+
+sdb_close(StreamTable) ->
+  dets:close(StreamTable).
 
 %%%---------------------------------------------------------------------------
 
