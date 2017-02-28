@@ -79,6 +79,7 @@
 %% UUID string representation.
 
 -define(TABLE_NAME_RE, "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$").
+-define(TABLE_FILE_WILDCARD, "??/??/????-????-????-????-????????????").
 
 -type address() :: term().
 
@@ -275,11 +276,10 @@ info(Handle) ->
 remove_older(Seconds) ->
   {ok, Directory} = application:get_env(harpcaller, stream_directory),
   OlderThan = timestamp() - Seconds,
-  FoldFun = fun(F, Acc) ->
-    remove_if_older(F, OlderThan),
-    Acc
-  end,
-  filelib:fold_files(Directory, ?TABLE_NAME_RE, false, FoldFun, []),
+  lists:foreach(
+    fun(F) -> remove_if_older(F, Directory, OlderThan) end,
+    filelib:wildcard(?TABLE_FILE_WILDCARD, Directory)
+  ),
   ok.
 
 %% @doc Remove stream log if it's submitted earlier than specified timestamp.
@@ -288,15 +288,17 @@ remove_older(Seconds) ->
 %%
 %%   File that is still opened is not removed.
 
--spec remove_if_older(file:filename(), integer()) ->
+-spec remove_if_older(file:filename(), file:filename(), integer()) ->
   any().
 
-remove_if_older(File, Timestamp) ->
-  case is_still_opened(File) of
+remove_if_older(File, Directory, Timestamp) ->
+  TableName = [C || C <- File, C /= $/], % XXX: remove slashes from filename
+  case is_still_opened(TableName) of
     false ->
-      case submitted_time(File) of
-        undefined -> file:delete(File);
-        Created when Created =< Timestamp -> file:delete(File);
+      FullPath = filename:join(Directory, File),
+      case submitted_time(FullPath) of
+        undefined -> file:delete(FullPath);
+        Created when Created =< Timestamp -> file:delete(FullPath);
         _Created -> ok
       end;
     true ->
@@ -305,11 +307,10 @@ remove_if_older(File, Timestamp) ->
 
 %% @doc Check if the specified file is still opened as SDB.
 
--spec is_still_opened(file:filename()) ->
+-spec is_still_opened(table_name()) ->
   boolean().
 
-is_still_opened(File) ->
-  TableName = filename:basename(File),
+is_still_opened(TableName) ->
   case ets:lookup(?ETS_REGISTRY_TABLE, TableName) of
     [{TableName, _Pid}] -> true;
     [] -> false
@@ -568,33 +569,51 @@ code_change(_OldVsn, State, _Extra) ->
 %%   Database file opened for writing is automatically initialized with call
 %%   info.
 
--spec sdb_open(file:filename(), list()) ->
+-spec sdb_open(table_name(), list()) ->
   {ok, StreamTable, StreamCount, Mode} | {error, term()}
   when StreamTable :: dets:tab_name(),
        StreamCount :: non_neg_integer(),
        Mode :: read_write | read.
 
 sdb_open(TableName, AccessModeAndArgs) ->
-  % TODO: check `TableName' for valid name format
-  {ok, Directory} = application:get_env(stream_directory),
-  Filename = filename:join(Directory, TableName),
-  Access = case AccessModeAndArgs of
-    [write | _] -> read_write;
-    [read | _] -> read
-  end,
-  case filelib:ensure_dir(Filename) of
-    ok ->
-      case dets:open_file(Filename, [{type, set}, {access, Access}]) of
-        {ok, StreamTable} ->
-          StreamCount = sdb_init(StreamTable, AccessModeAndArgs),
-          {ok, StreamTable, StreamCount, Access};
-        {error, {file_error, _, Reason}} ->
-          {error, Reason};
+  case sdb_filename(TableName) of
+    {ok, Filename} ->
+      Access = case AccessModeAndArgs of
+        [write | _] -> read_write;
+        [read | _] -> read
+      end,
+      case filelib:ensure_dir(Filename) of
+        ok ->
+          case dets:open_file(Filename, [{type, set}, {access, Access}]) of
+            {ok, StreamTable} ->
+              StreamCount = sdb_init(StreamTable, AccessModeAndArgs),
+              {ok, StreamTable, StreamCount, Access};
+            {error, {file_error, _, Reason}} ->
+              {error, Reason};
+            {error, Reason} ->
+              {error, Reason}
+          end;
         {error, Reason} ->
           {error, Reason}
       end;
-    {error, Reason} ->
-      {error, Reason}
+    {error, badarg} ->
+      {error, bad_name}
+  end.
+
+%% @doc Convert table name to a stream file name.
+
+-spec sdb_filename(table_name()) ->
+  {ok, file:filename()} | {error, badarg}.
+
+sdb_filename(TableName) ->
+  case re:run(TableName, ?TABLE_NAME_RE, [{capture, none}]) of
+    match ->
+      {ok, Directory} = application:get_env(stream_directory),
+      [C1, C2, C3, C4 | Rest] = TableName,
+      Filename = filename:join([Directory, [C1, C2], [C3, C4], Rest]),
+      {ok, Filename};
+    nomatch ->
+      {error, badarg}
   end.
 
 %% @doc Initialize the stream result file.
@@ -736,6 +755,8 @@ timestamp() ->
 -spec format_error(term()) ->
   iolist().
 
+format_error(bad_name = _Error) ->
+  "invalid stream result table name";
 format_error(file_load_race_condition = _Error) ->
   "file opening race";
 format_error(Error) when is_atom(Error) ->
