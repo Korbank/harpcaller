@@ -56,7 +56,7 @@
 -export([new/4, load/1, close/1]).
 -export([started/1, insert/2, set_result/2]).
 -export([result/1, stream/2, stream_size/1, info/1]).
--export([remove_older/1]).
+-export([list/0, remove_older/1]).
 -export([format_error/1]).
 
 -export_type([handle/0, info_call/0, info_time/0]).
@@ -292,8 +292,7 @@ remove_older(Seconds) ->
   any().
 
 remove_if_older(File, Directory, Timestamp) ->
-  TableName = [C || C <- File, C /= $/], % XXX: remove slashes from filename
-  case is_still_opened(TableName) of
+  case is_still_opened(filename_to_table(File)) of
     false ->
       FullPath = filename:join(Directory, File),
       case submitted_time(FullPath) of
@@ -334,6 +333,32 @@ submitted_time(File) ->
       % any read error, including not-a-DETS, enoent, eperm
       undefined
   end.
+
+%% }}}
+%%----------------------------------------------------------
+%% listing tables {{{
+
+%% @doc List known stream databases, opened and closed.
+%%
+%%   Identifiers are suitable for {@link load/1}.
+
+-spec list() ->
+  [table_name()].
+
+list() ->
+  {ok, Directory} = application:get_env(harpcaller, stream_directory),
+  _Tables = [
+    filename_to_table(File) ||
+    File <- filelib:wildcard(?TABLE_FILE_WILDCARD, Directory)
+  ].
+
+%% @doc Convert file name to name of a table.
+
+-spec filename_to_table(file:filename()) ->
+  table_name().
+
+filename_to_table(File) ->
+  _TableName = [C || C <- File, C /= $/].
 
 %% }}}
 %%----------------------------------------------------------
