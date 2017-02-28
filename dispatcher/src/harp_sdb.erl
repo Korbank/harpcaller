@@ -57,6 +57,7 @@
 -export([started/1, insert/2, set_result/2]).
 -export([result/1, stream/2, stream_size/1, info/1]).
 -export([remove_older/1]).
+-export([format_error/1]).
 
 -export_type([handle/0, info_call/0, info_time/0]).
 
@@ -625,4 +626,19 @@ timestamp() ->
   MS * 1000 * 1000 + S.
 
 %%%---------------------------------------------------------------------------
+
+%% @doc Convert an error to a printable form.
+
+-spec format_error(term()) ->
+  iolist().
+
+format_error(file_load_race_condition = _Error) ->
+  "file opening race";
+format_error(Error) when is_atom(Error) ->
+  file:format_error(Error);
+format_error(Error) ->
+  io_lib:format("unknown error: ~1024p", [Error]).
+
+%%%---------------------------------------------------------------------------
+
 %%% vim:ft=erlang:foldmethod=marker
