@@ -45,7 +45,7 @@
 -behaviour(gen_server).
 
 %% supervision tree API
--export([start/6, start/3, start_link/6, start_link/3]).
+-export([start/7, start/3, start_link/7, start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, terminate/2]).
@@ -53,7 +53,7 @@
 -export([code_change/3]).
 
 %% public interface
--export([new/4, load/1, close/1]).
+-export([new/5, load/1, close/1]).
 -export([started/1, insert/2, set_result/2]).
 -export([result/1, stream/2, stream_size/1, info/1]).
 -export([list/0, remove_older/1]).
@@ -103,11 +103,15 @@
 
 %% @doc Create new, empty table.
 
--spec new(table_name(), harp:procedure(), [harp:argument()], address()) ->
+-spec new(table_name(), harp:procedure(), [harp:argument()], address(),
+          harp:call_info()) ->
   {ok, handle()} | {error, term()}.
 
-new(TableName, Procedure, ProcArgs, RemoteAddress) ->
-  Args = [TableName, self(), write, Procedure, ProcArgs, RemoteAddress],
+new(TableName, Procedure, ProcArgs, RemoteAddress, CallInfo) ->
+  Args = [
+    TableName, self(), write,
+    Procedure, ProcArgs, RemoteAddress, CallInfo
+  ],
   case harp_sdb_sup:spawn_child(Args) of
     {ok, Pid} when is_pid(Pid) -> {ok, Pid};
     {ok, undefined} -> {error, eexist};
@@ -254,7 +258,7 @@ stream_size(Handle) ->
 %% @doc Get information recorded about the RPC call.
 
 -spec info(handle()) ->
-  {ok, {info_call(), address(), info_time()}}.
+  {ok, {info_call(), address(), info_time(), harp:call_info()}}.
 
 info(Handle) ->
   gen_server:call(Handle, get_info).
@@ -370,8 +374,10 @@ filename_to_table(File) ->
 %% @private
 %% @doc Start R/W stream DB process.
 
-start(TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress) ->
-  Args = [TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress],
+start(TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress,
+      CallInfo) ->
+  Args = [TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress,
+          CallInfo],
   gen_server:start(?MODULE, Args, []).
 
 %% @private
@@ -384,8 +390,10 @@ start(TableName, Pid, AccessMode) ->
 %% @private
 %% @doc Start stream DB process.
 
-start_link(TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress) ->
-  Args = [TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress],
+start_link(TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress,
+           CallInfo) ->
+  Args = [TableName, Pid, AccessMode, Procedure, ProcArgs, RemoteAddress,
+          CallInfo],
   gen_server:start_link(?MODULE, Args, []).
 
 %% @private
@@ -652,13 +660,14 @@ sdb_filename(TableName) ->
 sdb_init(StreamTable, [read] = _AccessModeAndArgs) ->
   [{stream_count, StreamCount}] = dets:lookup(StreamTable, stream_count),
   StreamCount;
-sdb_init(StreamTable, [write, Procedure, ProcArgs, RemoteAddress]) ->
+sdb_init(StreamTable, [write, Procedure, ProcArgs, RemoteAddress, CallInfo]) ->
   StreamCount = 0,
   % job metadata
   dets:insert(StreamTable, [
     {procedure, {Procedure, ProcArgs}},
     {host, RemoteAddress},
     {job_submitted, timestamp()},
+    {call_info, CallInfo},
     {stream_count, StreamCount}
   ]),
   StreamCount.
@@ -743,7 +752,7 @@ sdb_get_stream_record(StreamTable, N) ->
 %% @doc Read job's information from result file.
 
 -spec sdb_get_info(dets:tab_name()) ->
-  {info_call(), address(), info_time()}.
+  {info_call(), address(), info_time(), harp:call_info()}.
 
 sdb_get_info(StreamTable) ->
   [{procedure, {_, _} = CallInfo}] = dets:lookup(StreamTable, procedure),
@@ -757,8 +766,12 @@ sdb_get_info(StreamTable) ->
     [{job_end, EndTime}] -> ok;
     [] -> EndTime = undefined
   end,
+  case dets:lookup(StreamTable, call_info) of
+    [{call_info, CallMeta}] -> ok;
+    [] -> CallMeta = null % old SDB format
+  end,
   TimeInfo = {SubmitTime, StartTime, EndTime},
-  _Info = {CallInfo, Host, TimeInfo}.
+  _Info = {CallInfo, Host, TimeInfo, CallMeta}.
 
 %% }}}
 %%----------------------------------------------------------

@@ -185,7 +185,8 @@ follow_stream(JobID) when is_list(JobID) ->
 %%   when there's no job with identifier of `JobID'.
 
 -spec get_call_info(harpcaller:job_id()) ->
-    {ok, {harp_sdb:info_call(), Host :: term(), harp_sdb:info_time()}}
+    {ok, {harp_sdb:info_call(), Host :: term(), harp_sdb:info_time(),
+          harp:call_info()}}
   | {error, term()}
   | undefined.
 
@@ -280,7 +281,8 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
     {procedure, ensure_binary(Procedure)}
   ]),
   harpcaller_log:info("starting a new call"),
-  case harp_sdb:new(JobID, Procedure, ProcArgs, Host) of
+  % TODO: receive, decode, and pass `CallInfo' instead of `null'
+  case harp_sdb:new(JobID, Procedure, ProcArgs, Host, null) of
     {ok, StreamTable} ->
       gen_server:reply(From, {ok, JobID}),
       FilledState = State#state{

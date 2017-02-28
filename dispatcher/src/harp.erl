@@ -11,7 +11,7 @@
 -export([format_error/1, error_type/1]).
 
 -export_type([procedure/0, argument/0]).
--export_type([stream_record/0, result/0, error_description/0]).
+-export_type([stream_record/0, result/0, call_info/0, error_description/0]).
 -export_type([handle/0]).
 
 %%%---------------------------------------------------------------------------
@@ -24,6 +24,9 @@
 -type result() :: harp_json:struct().
 
 -type stream_record() :: harp_json:struct().
+
+-type call_info() :: harp_json:struct().
+%% Arbitrary record stored along with the job itself. Opaque to HarpCaller.
 
 -type error_description() ::
     {Type :: binary(), Message :: binary()}

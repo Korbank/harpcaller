@@ -278,7 +278,8 @@ pid_job_info(Pid) ->
 job_info(JobID) ->
   case harpcaller_caller:get_call_info(JobID) of
     {ok, {{ProcName, ProcArgs} = _ProcInfo, Host,
-          {SubmitTime, StartTime, EndTime} = _TimeInfo}} ->
+          {SubmitTime, StartTime, EndTime} = _TimeInfo, _CallInfo}} ->
+      % TODO: use `CallInfo'
       _JobInfo = [
         {<<"job">>, list_to_binary(JobID)},
         {<<"call">>, [

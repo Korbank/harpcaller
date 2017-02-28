@@ -451,7 +451,8 @@ queue_log_info(undefined = _QueueSpec) ->
 job_status(JobID) ->
   case harpcaller_caller:get_call_info(JobID) of
     {ok, {{ProcName, ProcArgs} = _ProcInfo, Host,
-          {SubmitTime, StartTime, EndTime} = _TimeInfo}} ->
+          {SubmitTime, StartTime, EndTime} = _TimeInfo, _CallInfo}} ->
+      % TODO: use `CallInfo'
       JobStatus = [
         {<<"call">>, [
           {<<"procedure">>, ProcName},
