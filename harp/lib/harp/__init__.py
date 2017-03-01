@@ -413,6 +413,8 @@ class HarpCaller(object):
         :type timeout: positive integer (seconds)
         :param max_exec_time: maximum time the job is allowed to take
         :type max_exec_time: positive integer (seconds)
+        :param info: arbitrary data to associate with call
+        :type info: JSON-serializable data
         :return: target server representation
         :rtype: :class:`RemoteServer`
 
@@ -457,6 +459,7 @@ class RemoteServer(object):
         self._queue = None
         self._concurrency = None
         self._timeout = None
+        self._info = None
         self._max_exec_time = None
 
     def __call__(self, **kwargs):
@@ -469,6 +472,8 @@ class RemoteServer(object):
         :type timeout: positive integer (seconds)
         :param max_exec_time: maximum time the job is allowed to take
         :type max_exec_time: positive integer (seconds)
+        :param info: arbitrary data to associate with call
+        :type info: JSON-serializable data
         :return: :obj:`self`
 
         Adjust job options for this host.
@@ -481,6 +486,8 @@ class RemoteServer(object):
             self._timeout = kwargs["timeout"]
         if "max_exec_time" in kwargs:
             self._max_exec_time = kwargs["max_exec_time"]
+        if "info" in kwargs:
+            self._info = kwargs["info"]
         return self
 
     def _call_options(self):
@@ -491,6 +498,7 @@ class RemoteServer(object):
             },
             "timeout": self._timeout,
             "max_exec_time": self._max_exec_time,
+            "info": self._info,
         }
         if result["queue"]["name"] is None:
             del result["queue"]
@@ -866,6 +874,7 @@ class RemoteCall(object):
         metadata = collections.namedtuple("JobStatus", [
             "procedure", "args", "host",
             "submitted", "start", "end",
+            "info",
         ])
         response = self.dispatcher.request({
             "harpcaller": 1,
@@ -878,6 +887,7 @@ class RemoteCall(object):
             metadata.submitted = response["time"]["submit"]
             metadata.start     = response["time"]["start"]
             metadata.end       = response["time"]["end"]
+            metadata.info      = response["info"]
             self._metadata = metadata
         elif "error" in message:
             # {"type": "...", "message": "...", "data": ...}
@@ -951,6 +961,19 @@ class RemoteCall(object):
         if self._metadata is None:
             self._get_metadata()
         return self._metadata.end
+
+    def info(self):
+        '''
+        :return: ``info`` field previously passed in call options
+
+        Return ``info`` field that was specified in job options
+        (:meth:`RemoteServer.__call__()`). The content of this field is
+        completely up to user and may be used to convey additional context
+        between call submitter and call results consumer.
+        '''
+        if self._metadata is None:
+            self._get_metadata()
+        return self._metadata.info
 
     def __repr__(self):
         return '<%s.%s "%s">' % (
