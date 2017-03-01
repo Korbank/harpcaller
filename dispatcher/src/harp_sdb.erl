@@ -745,7 +745,6 @@ sdb_get_result(StreamTable) ->
 sdb_get_stream_record(StreamTable, N) ->
   case dets:lookup(StreamTable, N) of
     [{N, _Timestamp, Record}] -> {ok, Record};
-    [{N, Record}] -> {ok, Record}; % old SDB format
     [] -> none
   end.
 
@@ -757,6 +756,7 @@ sdb_get_stream_record(StreamTable, N) ->
 sdb_get_info(StreamTable) ->
   [{procedure, {_, _} = CallInfo}] = dets:lookup(StreamTable, procedure),
   [{host, Host}] = dets:lookup(StreamTable, host),
+  [{call_info, CallMeta}] = dets:lookup(StreamTable, call_info),
   [{job_submitted, SubmitTime}] = dets:lookup(StreamTable, job_submitted),
   case dets:lookup(StreamTable, job_start) of
     [{job_start, StartTime}] -> ok;
@@ -765,10 +765,6 @@ sdb_get_info(StreamTable) ->
   case dets:lookup(StreamTable, job_end) of
     [{job_end, EndTime}] -> ok;
     [] -> EndTime = undefined
-  end,
-  case dets:lookup(StreamTable, call_info) of
-    [{call_info, CallMeta}] -> ok;
-    [] -> CallMeta = null % old SDB format
   end,
   TimeInfo = {SubmitTime, StartTime, EndTime},
   _Info = {CallInfo, Host, TimeInfo, CallMeta}.
