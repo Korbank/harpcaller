@@ -307,10 +307,12 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
             {error, Reason} ->
               harpcaller_log:warn("call failed", [{error, {term, Reason}}]),
               harp_sdb:set_result(StreamTable, {error, Reason}),
-              % request itself failed, but the job was carried successfully;
-              % tell the parent that that part got done
-              % TODO: flush `follow' requests
-              {stop, normal, FilledState}
+              % XXX: don't terminate directly, because `start_request()' could
+              % take some time, and there could have arrived some follow
+              % requests; better to take these in, notify the followers of
+              % error, and then shutdown
+              gen_server:cast(self(), {terminate, {error, Reason}}),
+              {noreply, FilledState}
           end;
         {QueueName, Concurrency} ->
           % enqueue and wait for a message
@@ -325,6 +327,8 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
       harpcaller_log:err("opening stream storage failed",
                          [{error, {term, Reason}}]),
       % operational and (mostly) unexpected error; signal crashing
+      % NOTE: followers won't be processed here, but this is not problem,
+      % since such big operational errors should be rare
       StopReason = {open, Reason},
       {stop, StopReason, {error, StopReason}, State}
   end;
@@ -351,6 +355,13 @@ handle_cast({follow, Pid} = _Request, State = #state{followers = Followers}) ->
   Ref = erlang:monitor(process, Pid),
   ets:insert(Followers, {Pid, Ref}),
   {noreply, State, 0};
+
+handle_cast({terminate, {error, Reason}} = _Request,
+            State = #state{job_id = JobID}) ->
+  % instead of terminating on `start_request()' error, allow all the followers
+  % to subscribe and notify them before shutting down that the job terminated
+  notify_followers(State, {terminated, JobID, {error, Reason}}),
+  {stop, normal, State};
 
 %% unknown casts
 handle_cast(Request, State) ->
@@ -387,12 +398,14 @@ handle_info({go, QRef} = _Message,
       },
       {noreply, NewState, 0};
     {error, Reason} ->
+      % request itself failed, but the job was carried successfully
       harpcaller_log:warn("call failed", [{error, {term, Reason}}]),
       harp_sdb:set_result(StreamTable, {error, Reason}),
-      % request itself failed, but the job was carried successfully;
-      % tell the parent that that part got done
-      % TODO: flush `follow' requests
-      {stop, normal, State}
+      % XXX: don't terminate directly, because `start_request()' could take
+      % some time, and there could have arrived some follow requests; better
+      % to take these in, notify the followers of error, and then shutdown
+      gen_server:cast(self(), {terminate, {error, Reason}}),
+      {noreply, State}
   end;
 
 handle_info(timeout = _Message, State = #state{call = {queued, _QRef}}) ->
