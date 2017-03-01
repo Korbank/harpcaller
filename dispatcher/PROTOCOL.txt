@@ -18,6 +18,7 @@ Call request
   {"harpcaller": 1, "host": "...", "procedure": "...", "arguments": {...}}
   {"harpcaller": 1, ..., "timeout": integer, "max_exec_time": integer}
   {"harpcaller": 1, ..., "queue": {"name": {...}, "concurrency": C}}
+  {"harpcaller": 1, ..., "info": ...}
 
 Call may either use positional arguments or named arguments.
 Call with no arguments is indicated with an empty list.
@@ -34,6 +35,10 @@ its desired concurrency level (number of calls that are executed at the same
 time; if there are more calls in the queue than queue's concurrency level,
 some of them will be kept waiting until one or more currently executing calls
 terminate).
+
+Request may set an additional information about the job. This information is
+opaque to HarpCaller and will be returned as-is in response to "get_status"
+request. If this field was not specified, null is used as the value.
 
 Reply:
   {"harpcaller": 1, "job_id": "..."}
@@ -93,9 +98,11 @@ Reading full status of a job
 
 Value of "get_status" is job ID.
 
-Reply has two types of information, what was called and when it was called:
+Reply has three types of information: what was called, when it was called, and
+additional information passed by the caller in the unmodified form:
   { "call": {"host": "...", "procedure": "...", "arguments": ...},
-    "time": {"submit": integer, "start": integer, "end": integer} }
+    "time": {"submit": integer, "start": integer, "end": integer},
+    "info": ... }
 
 Value of "submit" is always set to a timestamp, but "start" and "end" may be
 null if the job wasn't started or hasn't ended yet (job cancelled before it
