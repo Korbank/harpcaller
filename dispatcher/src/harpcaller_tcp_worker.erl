@@ -294,6 +294,7 @@ read_request(Socket, Timeout) ->
       catch
         error:{badmatch,_}    -> {error, bad_protocol};
         error:{case_clause,_} -> {error, bad_protocol};
+        error:function_clause -> {error, bad_protocol};
         error:badarg          -> {error, bad_protocol}
       end;
     {error, timeout} ->
@@ -302,10 +303,17 @@ read_request(Socket, Timeout) ->
       {error, Reason}
   end.
 
+-record(req, {
+  protocol :: undefined | pos_integer(),
+  op :: atom(),
+  args = [] :: [term()],
+  opts = [] :: [term()]
+}).
+
 %% @doc Decode string into a request.
 %%
-%%   Function dies (`badmatch', `case_clause', or `badarg') when the request
-%%   is malformed.
+%%   Function dies (`badmatch', `case_clause', `function_clause', or `badarg')
+%%   when the request is malformed.
 
 -spec decode_request(binary()) ->
     request_call()
@@ -319,76 +327,104 @@ read_request(Socket, Timeout) ->
 decode_request(Line) ->
   % decoded object is supposed to be a JSON hash
   {ok, [{_,_} | _] = Request} = harp_json:decode(Line),
-  {ok, 1} = orddict:find(<<"harpcaller">>, Request),
-  Request1 = orddict:erase(<<"harpcaller">>, Request),
-  case Request1 of
-    % unqueued calls
-    [{<<"arguments">>, Args}, {<<"host">>, Host},
-      {<<"procedure">>, Procedure}] ->
-      {call, Procedure, Args, Host, undefined, undefined, undefined, null};
-    [{<<"arguments">>, Args}, {<<"host">>, Host},
-      {<<"procedure">>, Procedure}, {<<"timeout">>, Timeout}] ->
-      {call, Procedure, Args, Host, Timeout, undefined, undefined, null};
-    [{<<"arguments">>, Args}, {<<"host">>, Host},
-      {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure}] ->
-      {call, Procedure, Args, Host, undefined, MaxExecTime, undefined, null};
-    [{<<"arguments">>, Args}, {<<"host">>, Host},
-      {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
-      {<<"timeout">>, Timeout}] ->
-      {call, Procedure, Args, Host, Timeout, MaxExecTime, undefined, null};
-    % queued calls
-    [{<<"arguments">>, Args}, {<<"host">>, Host},
-      {<<"procedure">>, Procedure},
-      {<<"queue">>, QueueSpec}] ->
-      {call, Procedure, Args, Host, undefined, undefined,
-        parse_queue_spec(QueueSpec), null};
-    [{<<"arguments">>, Args}, {<<"host">>, Host},
-      {<<"procedure">>, Procedure},
-      {<<"queue">>, QueueSpec}, {<<"timeout">>, Timeout}] ->
-      {call, Procedure, Args, Host, Timeout, undefined,
-        parse_queue_spec(QueueSpec), null};
-    [{<<"arguments">>, Args}, {<<"host">>, Host},
-      {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
-      {<<"queue">>, QueueSpec}] ->
-      {call, Procedure, Args, Host, undefined, MaxExecTime,
-        parse_queue_spec(QueueSpec), null};
-    [{<<"arguments">>, Args}, {<<"host">>, Host},
-      {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
-      {<<"queue">>, QueueSpec}, {<<"timeout">>, Timeout}] ->
-      {call, Procedure, Args, Host, Timeout, MaxExecTime,
-        parse_queue_spec(QueueSpec), null};
+  case decode_request(Request, #req{}) of
+    #req{protocol = V} when V /= 1 ->
+      erlang:error(badarg);
+    %#req{op = undefined} -> % not necessary because the rest of case clauses
+    %  erlang:error(badarg);
 
-    [{<<"cancel">>, JobID}] ->
+    #req{op = call, args = [Procedure, Args, Host], opts = Opts} ->
+      % TODO: die on invalid or duplicated options
+      Timeout = proplists:get_value(timeout, Opts, undefined),
+      MaxExecTime = proplists:get_value(max_exec_time, Opts, undefined),
+      Queue = case proplists:get_value(queue, Opts, undefined) of
+        undefined -> undefined;
+        QueueSpec -> parse_queue_spec(QueueSpec)
+      end,
+      CallInfo = proplists:get_value(call_info, Opts, null),
+      {call, Procedure, Args, Host, Timeout, MaxExecTime, Queue, CallInfo};
+
+    #req{op = cancel, args = [JobID], opts = []} ->
       {cancel, convert_job_id(JobID)};
 
-    [{<<"get_result">>, JobID}] ->
+    #req{op = get_result, args = [JobID], opts = []} ->
       {get_result, convert_job_id(JobID), no_wait};
-    [{<<"get_result">>, JobID}, {<<"wait">>, false}] ->
+    #req{op = get_result, args = [JobID], opts = [{wait, false}]} ->
       {get_result, convert_job_id(JobID), no_wait};
-    [{<<"get_result">>, JobID}, {<<"wait">>, true}] ->
+    #req{op = get_result, args = [JobID], opts = [{wait, true}]} ->
       {get_result, convert_job_id(JobID), wait};
 
-    [{<<"get_status">>, JobID}] ->
+    #req{op = get_status, args = [JobID], opts = []} ->
       {get_status, convert_job_id(JobID)};
 
-    [{<<"follow_stream">>, JobID}] ->
+    #req{op = follow_stream, args = [JobID], opts = []} ->
       % XXX: `recent 0', as specified in the protocol; different from
       % `read_stream'
       {follow_stream, convert_job_id(JobID), recent, 0};
-    [{<<"follow_stream">>, JobID}, {<<"recent">>, RecentCount}] ->
+    #req{op = follow_stream, args = [JobID], opts = [{recent, RecentCount}]} ->
       {follow_stream, convert_job_id(JobID), recent, RecentCount};
-    [{<<"follow_stream">>, JobID}, {<<"since">>, Since}] ->
+    #req{op = follow_stream, args = [JobID], opts = [{since, Since}]} ->
       {follow_stream, convert_job_id(JobID), since, Since};
 
-    [{<<"read_stream">>, JobID}] ->
+    #req{op = read_stream, args = [JobID], opts = []} ->
       % XXX: `since 0', as specified in the protocol; different from
       % `follow_stream'
       {read_stream, convert_job_id(JobID), since, 0};
-    [{<<"read_stream">>, JobID}, {<<"recent">>, RecentCount}] ->
+    #req{op = read_stream, args = [JobID], opts = [{recent, RecentCount}]} ->
       {read_stream, convert_job_id(JobID), recent, RecentCount};
-    [{<<"read_stream">>, JobID}, {<<"since">>, Since}] ->
+    #req{op = read_stream, args = [JobID], opts = [{since, Since}]} ->
       {read_stream, convert_job_id(JobID), since, Since}
   end.
+
+%% @doc Walk through all the request fields and collect options from them.
+
+-spec decode_request(harp_json:jhash(), #req{}) ->
+  #req{}.
+
+decode_request([] = _Struct, Req = #req{}) ->
+  Req;
+
+decode_request([{<<"harpcaller">>, V} | Rest], Req = #req{protocol = undefined}) ->
+  decode_request(Rest, Req#req{protocol = V});
+
+decode_request([{<<"cancel">>, JobID} | Rest], Req = #req{op = undefined}) ->
+  decode_request(Rest, Req#req{op = cancel, args = [JobID]});
+
+decode_request([{<<"get_result">>, JobID} | Rest], Req = #req{op = undefined}) ->
+  decode_request(Rest, Req#req{op = get_result, args = [JobID]});
+
+decode_request([{<<"get_status">>, JobID} | Rest], Req = #req{op = undefined}) ->
+  decode_request(Rest, Req#req{op = get_status, args = [JobID]});
+
+decode_request([{<<"follow_stream">>, JobID} | Rest], Req = #req{op = undefined}) ->
+  decode_request(Rest, Req#req{op = follow_stream, args = [JobID]});
+
+decode_request([{<<"read_stream">>, JobID} | Rest], Req = #req{op = undefined}) ->
+  decode_request(Rest, Req#req{op = read_stream, args = [JobID]});
+
+decode_request([{<<"arguments">>, Args} | Rest], Req = #req{op = undefined}) ->
+  decode_request(Rest, Req#req{op = call, args = [Args]});
+decode_request([{<<"host">>, Host} | Rest], Req = #req{op = call, args = [Args]}) ->
+  decode_request(Rest, Req#req{args = [Args, Host]});
+decode_request([{<<"procedure">>, Proc} | Rest], Req = #req{op = call, args = [Args, Host]}) ->
+  decode_request(Rest, Req#req{args = [Proc, Args, Host]});
+
+decode_request([{<<"timeout">>, Timeout} | Rest], Req = #req{opts = Opts}) ->
+  decode_request(Rest, Req#req{opts = [{timeout, Timeout} | Opts]});
+decode_request([{<<"max_exec_time">>, MaxExecTime} | Rest], Req = #req{opts = Opts}) ->
+  decode_request(Rest, Req#req{opts = [{max_exec_time, MaxExecTime} | Opts]});
+decode_request([{<<"queue">>, Queue} | Rest], Req = #req{opts = Opts}) ->
+  decode_request(Rest, Req#req{opts = [{queue, Queue} | Opts]});
+decode_request([{<<"info">>, CallInfo} | Rest], Req = #req{opts = Opts}) ->
+  decode_request(Rest, Req#req{opts = [{call_info, CallInfo} | Opts]});
+
+decode_request([{<<"recent">>, N} | Rest], Req = #req{opts = Opts}) ->
+  decode_request(Rest, Req#req{opts = [{recent, N} | Opts]});
+decode_request([{<<"since">>, N} | Rest], Req = #req{opts = Opts}) ->
+  decode_request(Rest, Req#req{opts = [{since, N} | Opts]});
+
+decode_request([{<<"wait">>, Wait} | Rest], Req = #req{opts = Opts}) ->
+  decode_request(Rest, Req#req{opts = [{wait, Wait} | Opts]}).
 
 %% @doc Ensure the passed job ID is of proper (string) format.
 %%   If it is invalid, returned value will be an almost proper job ID, and
