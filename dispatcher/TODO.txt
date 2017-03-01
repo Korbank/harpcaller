@@ -4,13 +4,13 @@ time:
 == job result storage and retention ==
 
   * listing recorded jobs (including terminated ones)
-  * timestamps in stream logs
+  * timestamps in stream logs (already collected and stored; bubble it up to
+    protocol and client library)
 
 == communication with dispatcher ==
 
   * SSL listening sockets
   * client authentication
-  * add "enqueued" to possible returned values ("get_result", "read_stream")
   * job deduplication mechanism
     * "call this function, but not if last call was less than 10 minutes ago"
     * similar to queues: dedup key (~queue name) and dedup parameters
