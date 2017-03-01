@@ -54,7 +54,8 @@
   | {max_exec_time, timeout()}
   | {queue, harpcaller_call_queue:queue_name() |
               {harpcaller_call_queue:queue_name(),
-                Concurrency :: pos_integer()}}.
+                Concurrency :: pos_integer()}}
+  | {call_info, harp:call_info()}.
 
 -record(ssl_verify, {
   log_context :: {harpcaller_log:event_type(), harpcaller_log:event_info()},
@@ -274,15 +275,14 @@ terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
 
 handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
             State = #state{job_id = JobID, call = undefined}) ->
-  {Timeout, MaxExecTime, Queue} = decode_options(Options),
+  {Timeout, MaxExecTime, Queue, CallInfo} = decode_options(Options),
   harpcaller_log:set_context(caller, [
     {job, {str, JobID}},
     {host, Host}, % Host :: binary()
     {procedure, ensure_binary(Procedure)}
   ]),
   harpcaller_log:info("starting a new call"),
-  % TODO: receive, decode, and pass `CallInfo' instead of `null'
-  case harp_sdb:new(JobID, Procedure, ProcArgs, Host, null) of
+  case harp_sdb:new(JobID, Procedure, ProcArgs, Host, CallInfo) of
     {ok, StreamTable} ->
       gen_server:reply(From, {ok, JobID}),
       FilledState = State#state{
@@ -471,13 +471,15 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec decode_options([call_option()]) ->
   {Timeout :: timeout(), MaxExecTime :: timeout(),
-    Queue :: {harpcaller_call_queue:queue_name(), pos_integer()} | undefined}.
+    Queue :: {harpcaller_call_queue:queue_name(), pos_integer()} | undefined,
+    CallInfo :: harp:call_info()}.
 
 decode_options(Options) ->
   T = proplists:get_value(timeout, Options),
   {ok, TA} = application:get_env(default_timeout),
   E = proplists:get_value(max_exec_time, Options),
   {ok, EA} = application:get_env(max_exec_time),
+  CallInfo = proplists:get_value(call_info, Options, null),
   Queue = case proplists:get_value(queue, Options) of
     undefined ->
       undefined;
@@ -498,7 +500,7 @@ decode_options(Options) ->
     {_, _} when E  > EA -> EA * 1000;
     {_, _} when E =< EA -> E  * 1000
   end,
-  {Timeout, MaxExecTime, Queue}.
+  {Timeout, MaxExecTime, Queue, CallInfo}.
 
 notify_followers(_State = #state{followers = Followers}, Message) ->
   ets:foldl(fun send_message/2, Message, Followers),

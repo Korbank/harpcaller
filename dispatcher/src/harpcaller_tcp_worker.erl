@@ -37,8 +37,9 @@
     Host :: binary(),
     Timeout :: timeout() | undefined,
     MaxExecTime :: timeout() | undefined,
-    QueueSpec :: {Name :: harp_json:jhash(), Concurrency :: pos_integer()} |
-                 undefined}.
+    QueueSpec :: {Name :: harp_json:jhash(), Concurrency :: pos_integer()}
+               | undefined,
+    CallInfo :: harp:call_info()}.
 
 -type request_cancel() :: {cancel, harpcaller:job_id()}.
 
@@ -155,9 +156,10 @@ handle_cast(Request, State) ->
 
 handle_info(timeout = _Message, State = #state{socket = Socket}) ->
   case read_request(Socket, ?TCP_READ_INTERVAL) of
-    {call, Proc, Args, Host, Timeout, MaxExecTime, Queue} -> % long running
+    {call, Proc, Args, Host, Timeout, MaxExecTime, Queue, CallInfo} -> % long running
       put('$worker_function', call),
       harpcaller_log:info("call request", [
+        % TODO: include `CallInfo' in the log?
         {host, Host}, {procedure, Proc}, {procedure_arguments, Args},
         {timeout, undef_null(Timeout)},
         {max_exec_time, undef_null(MaxExecTime)},
@@ -177,8 +179,8 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
         undefined -> [];
         {QueueName, Concurrency} -> [{queue, {QueueName, Concurrency}}]
       end,
-      {ok, _Pid, JobID} =
-        harpcaller_caller:call(Proc, Args, Host, QueueOpts ++ Options),
+      AllOptions = QueueOpts ++ Options ++ [{call_info, CallInfo}],
+      {ok, _Pid, JobID} = harpcaller_caller:call(Proc, Args, Host, AllOptions),
       harpcaller_log:info("call process started", [{job, {str, JobID}}]),
       send_response(Socket, [
         {<<"harpcaller">>, 1},
@@ -323,38 +325,38 @@ decode_request(Line) ->
     % unqueued calls
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"procedure">>, Procedure}] ->
-      {call, Procedure, Args, Host, undefined, undefined, undefined};
+      {call, Procedure, Args, Host, undefined, undefined, undefined, null};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"procedure">>, Procedure}, {<<"timeout">>, Timeout}] ->
-      {call, Procedure, Args, Host, Timeout, undefined, undefined};
+      {call, Procedure, Args, Host, Timeout, undefined, undefined, null};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure}] ->
-      {call, Procedure, Args, Host, undefined, MaxExecTime, undefined};
+      {call, Procedure, Args, Host, undefined, MaxExecTime, undefined, null};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
       {<<"timeout">>, Timeout}] ->
-      {call, Procedure, Args, Host, Timeout, MaxExecTime, undefined};
+      {call, Procedure, Args, Host, Timeout, MaxExecTime, undefined, null};
     % queued calls
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"procedure">>, Procedure},
       {<<"queue">>, QueueSpec}] ->
       {call, Procedure, Args, Host, undefined, undefined,
-        parse_queue_spec(QueueSpec)};
+        parse_queue_spec(QueueSpec), null};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"procedure">>, Procedure},
       {<<"queue">>, QueueSpec}, {<<"timeout">>, Timeout}] ->
       {call, Procedure, Args, Host, Timeout, undefined,
-        parse_queue_spec(QueueSpec)};
+        parse_queue_spec(QueueSpec), null};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
       {<<"queue">>, QueueSpec}] ->
       {call, Procedure, Args, Host, undefined, MaxExecTime,
-        parse_queue_spec(QueueSpec)};
+        parse_queue_spec(QueueSpec), null};
     [{<<"arguments">>, Args}, {<<"host">>, Host},
       {<<"max_exec_time">>, MaxExecTime}, {<<"procedure">>, Procedure},
       {<<"queue">>, QueueSpec}, {<<"timeout">>, Timeout}] ->
       {call, Procedure, Args, Host, Timeout, MaxExecTime,
-        parse_queue_spec(QueueSpec)};
+        parse_queue_spec(QueueSpec), null};
 
     [{<<"cancel">>, JobID}] ->
       {cancel, convert_job_id(JobID)};
@@ -451,8 +453,7 @@ queue_log_info(undefined = _QueueSpec) ->
 job_status(JobID) ->
   case harpcaller_caller:get_call_info(JobID) of
     {ok, {{ProcName, ProcArgs} = _ProcInfo, Host,
-          {SubmitTime, StartTime, EndTime} = _TimeInfo, _CallInfo}} ->
-      % TODO: use `CallInfo'
+          {SubmitTime, StartTime, EndTime} = _TimeInfo, CallInfo}} ->
       JobStatus = [
         {<<"call">>, [
           {<<"procedure">>, ProcName},
@@ -463,7 +464,8 @@ job_status(JobID) ->
           {<<"submit">>, undef_null(SubmitTime)}, % non-null, but consistency
           {<<"start">>,  undef_null(StartTime)},
           {<<"end">>,    undef_null(EndTime)}
-        ]}
+        ]},
+        {<<"info">>, CallInfo}
       ],
       {ok, JobStatus};
     undefined ->
