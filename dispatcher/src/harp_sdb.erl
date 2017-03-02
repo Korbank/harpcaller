@@ -11,6 +11,8 @@
 %%%     <li>{@type @{procedure, @{harp:procedure(), [harp:argument()]@}@}}
 %%%         -- always stored</li>
 %%%     <li>{@type @{host, address()@}} -- always stored</li>
+%%%     <li>{@type @{call_info, harp:call_info()@}} -- arbitrary,
+%%%         caller-supplied data; always stored</li>
 %%%     <li>{@type @{job_submitted, Epoch :: integer()@}} -- always
 %%%         stored</li>
 %%%     <li>{@type @{job_start, Epoch :: integer()@}} -- for jobs that were
