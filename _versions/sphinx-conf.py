@@ -1,1 +1,1 @@
-../documentation/conf.py
+../doc/conf.py
