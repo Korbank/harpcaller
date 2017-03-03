@@ -26,36 +26,14 @@
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
--define(TCP_READ_INTERVAL, 100).
-
 -record(state, {socket}).
 
--type request_call() ::
-  {call,
-    Procedure :: binary(),
-    Arguments :: harp_json:jarray() | harp_json:jhash(),
-    Host :: binary(),
-    Timeout :: timeout() | undefined,
-    MaxExecTime :: timeout() | undefined,
-    QueueSpec :: {Name :: harp_json:jhash(), Concurrency :: pos_integer()}
-               | undefined,
-    CallInfo :: harp:call_info()}.
-
--type request_cancel() :: {cancel, harpcaller:job_id()}.
-
--type request_get_result() ::
-  {get_result, harpcaller:job_id(), wait | no_wait}.
-
--type request_get_status() ::
-  {get_status, harpcaller:job_id()}.
-
--type request_follow_stream() ::
-    {follow_stream, harpcaller:job_id(), since, non_neg_integer()}
-  | {follow_stream, harpcaller:job_id(), recent, non_neg_integer()}.
-
--type request_read_stream() ::
-    {read_stream, harpcaller:job_id(), since, non_neg_integer()}
-  | {read_stream, harpcaller:job_id(), recent, non_neg_integer()}.
+-record(req, {
+  protocol :: undefined | pos_integer(),
+  op :: atom(),
+  args = [] :: [term()],
+  opts = [] :: [{atom(), term()}]
+}).
 
 %%% }}}
 %%%---------------------------------------------------------------------------
@@ -118,11 +96,11 @@ init([Socket] = _Args) ->
     {local_address, {str, format_address(LocalAddr, LocalPort)}}
   ]),
   harpcaller_log:info("new connection"),
-  inet:setopts(Socket, [binary, {packet, line}, {active, false}]),
+  inet:setopts(Socket, [binary, {packet, line}, {active, once}]),
   State = #state{
     socket = Socket
   },
-  {ok, State, 0}.
+  {ok, State}.
 
 %% @private
 %% @doc Clean up after event handler.
@@ -154,65 +132,27 @@ handle_cast(Request, State) ->
 %% @private
 %% @doc Handle incoming messages.
 
-handle_info(timeout = _Message, State = #state{socket = Socket}) ->
-  case read_request(Socket, ?TCP_READ_INTERVAL) of
-    {call, Proc, Args, Host, Timeout, MaxExecTime, Queue, CallInfo} -> % long running
+handle_info({tcp, Socket, Line} = _Message,
+            State = #state{socket = Socket}) ->
+  case decode_request(Line) of
+    #req{op = call, args = [Proc, Args, Host], opts = Opts} ->
       put('$worker_function', call),
-      harpcaller_log:info("call request", [
-        % TODO: include `CallInfo' in the log?
-        {host, Host}, {procedure, Proc}, {procedure_arguments, Args},
-        {timeout, undef_null(Timeout)},
-        {max_exec_time, undef_null(MaxExecTime)},
-        {queue, queue_log_info(Queue)}
-      ]),
-      Options = case {Timeout, MaxExecTime} of
-        {undefined, undefined} ->
-          [];
-        {_, undefined} when is_integer(Timeout) ->
-          [{timeout, Timeout}];
-        {undefined, _} when is_integer(MaxExecTime) ->
-          [{max_exec_time, MaxExecTime}];
-        {_, _} when is_integer(Timeout), is_integer(MaxExecTime) ->
-          [{timeout, Timeout}, {max_exec_time, MaxExecTime}]
-      end,
-      QueueOpts = case Queue of
-        undefined -> [];
-        {QueueName, Concurrency} -> [{queue, {QueueName, Concurrency}}]
-      end,
-      AllOptions = QueueOpts ++ Options ++ [{call_info, CallInfo}],
-      {ok, _Pid, JobID} = harpcaller_caller:call(Proc, Args, Host, AllOptions),
-      harpcaller_log:info("call process started", [{job, {str, JobID}}]),
+      {ok, JobID} = execute_call(Proc, Args, Host, Opts),
       send_response(Socket, [
         {<<"harpcaller">>, 1},
         {<<"job_id">>, list_to_binary(JobID)}
       ]),
       {stop, normal, State};
-    {cancel, JobID} -> % immediate
+    #req{op = cancel, args = [JobID]} ->
       put('$worker_function', cancel),
-      harpcaller_log:info("cancel job", [{job, {str, JobID}}]),
-      case harpcaller_caller:cancel(JobID) of
-        ok        -> send_response(Socket, [{<<"cancelled">>, true}]);
-        undefined -> send_response(Socket, [{<<"cancelled">>, false}])
-      end,
+      Cancelled = execute_cancel(JobID),
+      send_response(Socket, [{<<"cancelled">>, Cancelled}]),
       {stop, normal, State};
-    {get_result, JobID, Mode} -> % long running or immediate, depending on mode
-      put('$worker_function', get_result),
-      Wait = case Mode of
-        wait -> true;
-        no_wait -> false
-      end,
-      harpcaller_log:append_context([{job, {str, JobID}}]),
-      harpcaller_log:info("get job's result", [{wait, Wait}]),
-      NewState = harpcaller_tcp_return_result:state(Socket, JobID, Wait),
-      % this does not return to this code
-      gen_server:enter_loop(harpcaller_tcp_return_result, [], NewState, 0);
-    {get_status, JobID} -> % immediate
+    #req{op = get_status, args = [JobID]} ->
       put('$worker_function', get_status),
-      harpcaller_log:append_context([{job, {str, JobID}}]),
-      harpcaller_log:info("get job's status"),
-      case job_status(JobID) of
-        {ok, JobStatus} ->
-          send_response(Socket, JobStatus);
+      case execute_get_status(JobID) of
+        {ok, JobStatusStruct} ->
+          send_response(Socket, JobStatusStruct);
         undefined ->
           send_response(Socket, [
             {<<"error">>, [
@@ -220,39 +160,42 @@ handle_info(timeout = _Message, State = #state{socket = Socket}) ->
               {<<"message">>, <<"no job with this ID">>}
             ]}
           ]);
-        {error, Reason} -> % `Reason' is a binary
-          harpcaller_log:warn("job status reading error", [{error, Reason}]),
+        {error, Message} ->
+          harpcaller_log:warn("job status reading error", [{error, Message}]),
           send_response(Socket, [
             {<<"error">>, [
               {<<"type">>, <<"unrecognized">>},
-              {<<"message">>, Reason}
+              {<<"message">>, Message}
             ]}
           ])
       end,
       {stop, normal, State};
-    {follow_stream, JobID, Mode, ModeArg} -> % long running
-      % `Mode :: recent | since'
+    #req{op = get_result, args = [JobID], opts = Opts} ->
+      put('$worker_function', get_result),
+      % TODO: handle this without calling another module
+      {Module, NewState} = execute_get_result(Socket, JobID, Opts),
+      gen_server:enter_loop(Module, [], NewState, 0);
+    #req{op = follow_stream, args = [JobID], opts = Opts} ->
       put('$worker_function', follow_stream),
-      harpcaller_log:append_context([{job, {str, JobID}}]),
-      harpcaller_log:info("follow job's streamed result"),
-      NewState = harpcaller_tcp_return_stream:state(Socket, JobID, follow, {Mode, ModeArg}),
-      % this does not return to this code
-      gen_server:enter_loop(harpcaller_tcp_return_stream, [], NewState, 0);
-    {read_stream, JobID, Mode, ModeArg} -> % immediate
-      % `Mode :: recent | since'
+      % TODO: handle this without calling another module
+      {Module, NewState} = execute_follow_stream(Socket, JobID, Opts),
+      gen_server:enter_loop(Module, [], NewState, 0);
+    #req{op = read_stream, args = [JobID], opts = Opts} ->
       put('$worker_function', read_stream),
-      harpcaller_log:append_context([{job, {str, JobID}}]),
-      harpcaller_log:info("follow job's streamed result"),
-      NewState = harpcaller_tcp_return_stream:state(Socket, JobID, read, {Mode, ModeArg}),
-      % this does not return to this code
-      gen_server:enter_loop(harpcaller_tcp_return_stream, [], NewState, 0);
-    timeout ->
-      % yield for next system message if any awaits our attention
-      {noreply, State, 0};
-    {error, Reason} ->
-      harpcaller_log:warn("request reading error", [{error, {term, Reason}}]),
-      {stop, normal, State}
+      % TODO: handle this without calling another module
+      {Module, NewState} = execute_read_stream(Socket, JobID, Opts),
+      gen_server:enter_loop(Module, [], NewState, 0)
   end;
+
+handle_info({tcp_closed, Socket} = _Message,
+            State = #state{socket = Socket}) ->
+  harpcaller_log:info("no request read"),
+  {stop, normal, State};
+
+handle_info({tcp_error, Socket, Reason} = _Message,
+            State = #state{socket = Socket}) ->
+  harpcaller_log:warn("request reading error", [{error, {term, Reason}}]),
+  {stop, normal, State};
 
 %% unknown messages
 handle_info(Message, State) ->
@@ -273,108 +216,72 @@ code_change(_OldVsn, State, _Extra) ->
 %%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
-
-%% @doc Read a request from TCP socket.
-
--spec read_request(gen_tcp:socket(), timeout()) ->
-    request_call()
-  | request_cancel()
-  | request_get_result()
-  | request_get_status()
-  | request_follow_stream()
-  | request_read_stream()
-  | timeout
-  | {error, term()}.
-
-read_request(Socket, Timeout) ->
-  case gen_tcp:recv(Socket, 0, Timeout) of
-    {ok, Line} ->
-      try
-        decode_request(Line)
-      catch
-        error:{badmatch,_}    -> {error, bad_protocol};
-        error:{case_clause,_} -> {error, bad_protocol};
-        error:function_clause -> {error, bad_protocol};
-        error:badarg          -> {error, bad_protocol}
-      end;
-    {error, timeout} ->
-      timeout;
-    {error, Reason} ->
-      {error, Reason}
-  end.
-
--record(req, {
-  protocol :: undefined | pos_integer(),
-  op :: atom(),
-  args = [] :: [term()],
-  opts = [] :: [term()]
-}).
+%%% decode_request() {{{
 
 %% @doc Decode string into a request.
-%%
-%%   Function dies (`badmatch', `case_clause', `function_clause', or `badarg')
-%%   when the request is malformed.
 
 -spec decode_request(binary()) ->
-    request_call()
-  | request_cancel()
-  | request_get_result()
-  | request_get_status()
-  | request_follow_stream()
-  | request_read_stream()
-  | no_return().
+  #req{} | {error, bad_protocol}.
 
 decode_request(Line) ->
   % decoded object is supposed to be a JSON hash
-  {ok, [{_,_} | _] = Request} = harp_json:decode(Line),
-  case decode_request(Request, #req{}) of
+  try decode_request(try_decode_hash(Line), #req{}) of
     #req{protocol = V} when V /= 1 ->
-      erlang:error(badarg);
-    %#req{op = undefined} -> % not necessary because the rest of case clauses
-    %  erlang:error(badarg);
+      {error, bad_protocol};
+    #req{op = undefined} ->
+      {error, bad_protocol};
 
-    #req{op = call, args = [Procedure, Args, Host], opts = Opts} ->
-      % TODO: die on invalid or duplicated options
-      Timeout = proplists:get_value(timeout, Opts, undefined),
-      MaxExecTime = proplists:get_value(max_exec_time, Opts, undefined),
-      Queue = case proplists:get_value(queue, Opts, undefined) of
-        undefined -> undefined;
-        QueueSpec -> parse_queue_spec(QueueSpec)
-      end,
-      CallInfo = proplists:get_value(call_info, Opts, null),
-      {call, Procedure, Args, Host, Timeout, MaxExecTime, Queue, CallInfo};
+    Req = #req{op = call, args = [_Procedure, _Args, _Host], opts = _Opts} ->
+      Req;
 
-    #req{op = cancel, args = [JobID], opts = []} ->
-      {cancel, convert_job_id(JobID)};
+    Req = #req{op = cancel, args = [JobID], opts = []} ->
+      Req#req{args = [convert_job_id(JobID)]};
 
-    #req{op = get_result, args = [JobID], opts = []} ->
-      {get_result, convert_job_id(JobID), no_wait};
-    #req{op = get_result, args = [JobID], opts = [{wait, false}]} ->
-      {get_result, convert_job_id(JobID), no_wait};
-    #req{op = get_result, args = [JobID], opts = [{wait, true}]} ->
-      {get_result, convert_job_id(JobID), wait};
+    Req = #req{op = get_result, args = [JobID], opts = []} ->
+      Req#req{args = [convert_job_id(JobID)], opts = [{wait, false}]};
+    Req = #req{op = get_result, args = [JobID], opts = [{wait, false}]} ->
+      Req#req{args = [convert_job_id(JobID)]};
+    Req = #req{op = get_result, args = [JobID], opts = [{wait, true}]} ->
+      Req#req{args = [convert_job_id(JobID)]};
 
-    #req{op = get_status, args = [JobID], opts = []} ->
-      {get_status, convert_job_id(JobID)};
+    Req = #req{op = get_status, args = [JobID], opts = []} ->
+      Req#req{args = [convert_job_id(JobID)]};
 
-    #req{op = follow_stream, args = [JobID], opts = []} ->
+    Req = #req{op = follow_stream, args = [JobID], opts = []} ->
       % XXX: `recent 0', as specified in the protocol; different from
       % `read_stream'
-      {follow_stream, convert_job_id(JobID), recent, 0};
-    #req{op = follow_stream, args = [JobID], opts = [{recent, RecentCount}]} ->
-      {follow_stream, convert_job_id(JobID), recent, RecentCount};
-    #req{op = follow_stream, args = [JobID], opts = [{since, Since}]} ->
-      {follow_stream, convert_job_id(JobID), since, Since};
+      Req#req{args = [convert_job_id(JobID)], opts = [{recent, 0}]};
+    Req = #req{op = follow_stream, args = [JobID], opts = [{recent, _}]} ->
+      Req#req{args = [convert_job_id(JobID)]};
+    Req = #req{op = follow_stream, args = [JobID], opts = [{since, _}]} ->
+      Req#req{args = [convert_job_id(JobID)]};
 
-    #req{op = read_stream, args = [JobID], opts = []} ->
+    Req = #req{op = read_stream, args = [JobID], opts = []} ->
       % XXX: `since 0', as specified in the protocol; different from
       % `follow_stream'
-      {read_stream, convert_job_id(JobID), since, 0};
-    #req{op = read_stream, args = [JobID], opts = [{recent, RecentCount}]} ->
-      {read_stream, convert_job_id(JobID), recent, RecentCount};
-    #req{op = read_stream, args = [JobID], opts = [{since, Since}]} ->
-      {read_stream, convert_job_id(JobID), since, Since}
+      Req#req{args = [convert_job_id(JobID)], opts = [{since, 0}]};
+    Req = #req{op = read_stream, args = [JobID], opts = [{recent, _}]} ->
+      Req#req{args = [convert_job_id(JobID)]};
+    Req = #req{op = read_stream, args = [JobID], opts = [{since, _}]} ->
+      Req#req{args = [convert_job_id(JobID)]};
+
+    _ ->
+      {error, bad_protocol}
+  catch
+    error:{badmatch,_}    -> {error, bad_protocol};
+    error:{case_clause,_} -> {error, bad_protocol};
+    error:function_clause -> {error, bad_protocol};
+    error:badarg          -> {error, bad_protocol}
   end.
+
+%% @doc Decode a non-empty JSON hash, dying on error.
+
+-spec try_decode_hash(binary()) ->
+  harp_json:jhash().
+
+try_decode_hash(Line) ->
+  {ok, [{_,_} | _] = Struct} = harp_json:decode(Line),
+  Struct.
 
 %% @doc Walk through all the request fields and collect options from them.
 
@@ -413,7 +320,13 @@ decode_request([{<<"timeout">>, Timeout} | Rest], Req = #req{opts = Opts}) ->
   decode_request(Rest, Req#req{opts = [{timeout, Timeout} | Opts]});
 decode_request([{<<"max_exec_time">>, MaxExecTime} | Rest], Req = #req{opts = Opts}) ->
   decode_request(Rest, Req#req{opts = [{max_exec_time, MaxExecTime} | Opts]});
-decode_request([{<<"queue">>, Queue} | Rest], Req = #req{opts = Opts}) ->
+decode_request([{<<"queue">>, QueueSpec} | Rest], Req = #req{opts = Opts}) ->
+  Queue = case QueueSpec of
+    [{<<"concurrency">>, C}, {<<"name">>, [{_,_}|_] = Name}] -> {Name, C};
+    [{<<"concurrency">>, C}, {<<"name">>, [{}]      = Name}] -> {Name, C};
+    [{<<"name">>, [{_,_}|_] = Name}] -> {Name, 1};
+    [{<<"name">>, [{}]      = Name}] -> {Name, 1}
+  end,
   decode_request(Rest, Req#req{opts = [{queue, Queue} | Opts]});
 decode_request([{<<"info">>, CallInfo} | Rest], Req = #req{opts = Opts}) ->
   decode_request(Rest, Req#req{opts = [{call_info, CallInfo} | Opts]});
@@ -443,50 +356,89 @@ convert_job_id(JobID) when is_list(JobID) ->
 convert_job_id(_JobID) ->
   "00000000-0000-0000-0000-000000000000".
 
-%% @doc Parse queue specification from request.
+%%% }}}
+%%%---------------------------------------------------------------------------
 
--spec parse_queue_spec(harp_json:jhash()) ->
-  {harp_json:jhash(), pos_integer()} | no_return().
+%%%---------------------------------------------------------------------------
+%%% handle requests
+%%%---------------------------------------------------------------------------
 
-parse_queue_spec([{<<"concurrency">>, C},
-                   {<<"name">>, [{_,_}|_] = QueueName}] = _QueueSpec)
-when is_integer(C), C > 0 ->
-  {QueueName, C};
-parse_queue_spec([{<<"concurrency">>, C},
-                   {<<"name">>, [{}] = QueueName}] = _QueueSpec)
-when is_integer(C), C > 0 ->
-  {QueueName, C};
-parse_queue_spec([{<<"name">>, [{_,_}|_] = QueueName}] = _QueueSpec) ->
-  {QueueName, 1};
-parse_queue_spec([{<<"name">>, [{}] = QueueName}] = _QueueSpec) ->
-  {QueueName, 1}.
+%%----------------------------------------------------------
+%% execute_call() {{{
 
-%% @doc Encode a structure and send it as a response to client.
+%% @doc Execute call request, returning ID of the spawned call job.
 
--spec send_response(gen_tcp:socket(), harp_json:jhash()) ->
-  ok.
+-spec execute_call(binary(), harp_json:jarray() | harp_json:jhash(), binary(),
+                   [{atom(), term()}]) ->
+  {ok, harpcaller:job_id()}.
 
-send_response(Socket, Response) ->
-  {ok, Line} = harp_json:encode(Response),
-  ok = gen_tcp:send(Socket, [Line, $\n]),
-  ok.
+execute_call(Proc, Args, Host, Opts) ->
+  Timeout = proplists:get_value(timeout, Opts),
+  MaxExecTime = proplists:get_value(timeout, Opts),
+  Queue = proplists:get_value(queue, Opts),
+  CallInfo = proplists:get_value(call_info, Opts, null),
+  harpcaller_log:info("call request", [
+    % TODO: include `CallInfo' in the log?
+    {host, Host}, {procedure, Proc}, {procedure_arguments, Args},
+    {timeout, undef_null(Timeout)},
+    {max_exec_time, undef_null(MaxExecTime)},
+    {queue, format_queue(Queue)}
+  ]),
+  Options = call_time_options(Timeout, MaxExecTime) ++
+            call_queue_options(Queue) ++
+            [{call_info, CallInfo}],
+  {ok, _Pid, JobID} = harpcaller_caller:call(Proc, Args, Host, Options),
+  harpcaller_log:info("call process started", [{job, {str, JobID}}]),
+  {ok, JobID}.
 
-%% @doc Encode queue specification as a JSON-serializable object.
+%% @doc Build a list of timeout-related call options.
 
--spec queue_log_info({harp_json:jhash(), pos_integer()} | undefined) ->
-  harp_json:jhash() | null.
+call_time_options(undefined = _Timeout, undefined = _MaxExecTime) ->
+  [];
+call_time_options(Timeout, undefined = _MaxExecTime) ->
+  [{timeout, Timeout}];
+call_time_options(undefined = _Timeout, MaxExecTime) ->
+  [{max_exec_time, MaxExecTime}];
+call_time_options(Timeout, MaxExecTime) ->
+  [{timeout, Timeout}, {max_exec_time, MaxExecTime}].
 
-queue_log_info({QueueName, QueueConcurrency} = _QueueSpec) ->
-  [{name, QueueName}, {concurrency, QueueConcurrency}];
-queue_log_info(undefined = _QueueSpec) ->
-  null.
+%% @doc Build a list of queue-related options.
 
-%% @doc Read job status and format it as JSON-serializable object.
+call_queue_options(undefined = _Queue) ->
+  [];
+call_queue_options({QueueName, Concurrency} = _Queue) ->
+  [{queue, {QueueName, Concurrency}}].
 
--spec job_status(harpcaller:job_id()) ->
+%% }}}
+%%----------------------------------------------------------
+%% execute_cancel() {{{
+
+%% @doc Cancel a running job.
+%%
+%%   Function returns information whether the job was running.
+
+-spec execute_cancel(harpcaller:job_id()) ->
+  boolean().
+
+execute_cancel(JobID) ->
+  harpcaller_log:info("cancel job", [{job, {str, JobID}}]),
+  case harpcaller_caller:cancel(JobID) of
+    ok -> true;
+    undefined -> false
+  end.
+
+%% }}}
+%%----------------------------------------------------------
+%% execute_get_status() {{{
+
+%% @doc Return information about call job.
+
+-spec execute_get_status(harpcaller:job_id()) ->
   {ok, harp_json:struct()} | undefined | {error, binary()}.
 
-job_status(JobID) ->
+execute_get_status(JobID) ->
+  harpcaller_log:append_context([{job, {str, JobID}}]),
+  harpcaller_log:info("get job's status"),
   case harpcaller_caller:get_call_info(JobID) of
     {ok, {{ProcName, ProcArgs} = _ProcInfo, Host,
           {SubmitTime, StartTime, EndTime} = _TimeInfo, CallInfo}} ->
@@ -510,7 +462,86 @@ job_status(JobID) ->
       {error, iolist_to_binary(io_lib:format("~1024p", [Reason]))}
   end.
 
+%% }}}
+%%----------------------------------------------------------
+%% execute_get_result() {{{
+
+%% @doc Prepare a {@link gen_server} module and its state for getting job's
+%%   end result.
+
+-spec execute_get_result(gen_tcp:socket(), harpcaller:job_id(),
+                         [{atom(), term()}]) ->
+  {module(), NewState :: term()}.
+
+execute_get_result(Socket, JobID, Opts) ->
+  Wait = proplists:get_bool(wait, Opts),
+  harpcaller_log:append_context([{job, {str, JobID}}]),
+  harpcaller_log:info("get job's result", [{wait, Wait}]),
+  NewState = harpcaller_tcp_return_result:state(Socket, JobID, Wait),
+  {harpcaller_tcp_return_result, NewState}.
+
+%% }}}
+%%----------------------------------------------------------
+%% execute_follow_stream() {{{
+
+%% @doc Prepare a {@link gen_server} module and its state for following job's
+%%   stream result.
+
+-spec execute_follow_stream(gen_tcp:socket(), harpcaller:job_id(),
+                            [{atom(), term()}]) ->
+  {module(), NewState :: term()}.
+
+execute_follow_stream(Socket, JobID, Opts) ->
+  harpcaller_log:append_context([{job, {str, JobID}}]),
+  harpcaller_log:info("follow job's streamed result"),
+  case Opts of
+    [{since = Mode, N}] -> ok;
+    [{recent = Mode, N}] -> ok
+  end,
+  NewState = harpcaller_tcp_return_stream:state(Socket, JobID, follow,
+                                                {Mode, N}),
+  {harpcaller_tcp_return_stream, NewState}.
+
+%% }}}
+%%----------------------------------------------------------
+%% execute_read_stream() {{{
+
+%% @doc Prepare a {@link gen_server} module and its state for reading job's
+%%   stream result.
+
+-spec execute_read_stream(gen_tcp:socket(), harpcaller:job_id(),
+                          [{atom(), term()}]) ->
+  {module(), NewState :: term()}.
+
+execute_read_stream(Socket, JobID, Opts) ->
+  harpcaller_log:append_context([{job, {str, JobID}}]),
+  harpcaller_log:info("follow job's streamed result"),
+  case Opts of
+    [{since = Mode, N}] -> ok;
+    [{recent = Mode, N}] -> ok
+  end,
+  NewState = harpcaller_tcp_return_stream:state(Socket, JobID, read,
+                                                {Mode, N}),
+  {harpcaller_tcp_return_stream, NewState}.
+
+%% }}}
+%%----------------------------------------------------------
+
 %%%---------------------------------------------------------------------------
+%%% helper functions
+%%%---------------------------------------------------------------------------
+
+%% @doc Encode a structure and send it as a response to client.
+
+-spec send_response(gen_tcp:socket(), harp_json:jhash()) ->
+  ok.
+
+send_response(Socket, Response) ->
+  {ok, Line} = harp_json:encode(Response),
+  ok = gen_tcp:send(Socket, [Line, $\n]),
+  ok.
+
+%% @doc Format IP address and port number for logging.
 
 -spec format_address(inet:ip_address(), inet:port_number()) ->
   string().
@@ -524,6 +555,16 @@ format_address({A,B,C,D} = _Address, Port) ->
     integer_to_list(D)
   ],
   string:join(OctetList, ".") ++ ":" ++ integer_to_list(Port).
+
+%% @doc Format queue specification for logging.
+
+-spec format_queue({harp_json:jhash(), pos_integer()} | undefined) ->
+  harp_json:jhash() | null.
+
+format_queue({QueueName, QueueConcurrency} = _QueueSpec) ->
+  [{name, QueueName}, {concurrency, QueueConcurrency}];
+format_queue(undefined = _QueueSpec) ->
+  null.
 
 undef_null(undefined = _Value) -> null;
 undef_null(Value) -> Value.
