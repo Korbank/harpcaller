@@ -26,13 +26,18 @@
 %%%---------------------------------------------------------------------------
 %%% types {{{
 
--record(state, {socket}).
-
 -record(req, {
   protocol :: undefined | pos_integer(),
   op :: atom(),
   args = [] :: [term()],
   opts = [] :: [{atom(), term()}]
+}).
+
+-record(state, {
+  socket :: gen_tcp:socket(),
+  request :: #req{} | undefined,
+  job_monitor :: reference() | undefined,
+  skip_stream :: all | non_neg_integer() | undefined
 }).
 
 %%% }}}
@@ -132,8 +137,36 @@ handle_cast(Request, State) ->
 %% @private
 %% @doc Handle incoming messages.
 
-handle_info({tcp, Socket, Line} = _Message,
+handle_info({record, _JobID, Id, _Record} = _Message,
+            State = #state{skip_stream = SkipBefore})
+when SkipBefore == all; Id < SkipBefore ->
+  {noreply, State};
+
+handle_info({record, _JobID, Id, Record} = _Message,
+            State = #state{socket = Socket, skip_stream = SkipBefore})
+when SkipBefore == undefined; Id >= SkipBefore ->
+  case send_response(Socket, [{<<"packet">>, Id}, {<<"data">>, Record}]) of
+    ok -> {noreply, State};
+    {error, _Reason} -> {stop, normal, State}
+  end;
+
+handle_info({'DOWN', MonRef, process, Pid, Reason} = _Message,
+            State = #state{socket = Socket, job_monitor = MonRef}) ->
+  % the process carrying out the job died
+  harpcaller_log:info("job died",
+                      [{pid, {term, Pid}}, {error, {term, Reason}}]),
+  send_response(Socket, format_result(missing)),
+  {stop, normal, State};
+
+handle_info({terminated, _JobID, Result} = _Message,
             State = #state{socket = Socket}) ->
+  % got our result; send it to the client
+  harpcaller_log:info("job terminated"),
+  send_response(Socket, format_result(Result)),
+  {stop, normal, State};
+
+handle_info({tcp, Socket, Line} = _Message,
+            State = #state{socket = Socket, request = undefined}) ->
   case decode_request(Line) of
     #req{op = call, args = [Proc, Args, Host], opts = Opts} ->
       put('$worker_function', call),
@@ -170,31 +203,78 @@ handle_info({tcp, Socket, Line} = _Message,
           ])
       end,
       {stop, normal, State};
-    #req{op = get_result, args = [JobID], opts = Opts} ->
+    #req{op = get_result, args = [JobID], opts = Opts} = Req ->
       put('$worker_function', get_result),
-      % TODO: handle this without calling another module
-      {Module, NewState} = execute_get_result(Socket, JobID, Opts),
-      gen_server:enter_loop(Module, [], NewState, 0);
-    #req{op = follow_stream, args = [JobID], opts = Opts} ->
+      case execute_get_result(JobID, Opts) of
+        {ok, still_running = _Result} ->
+          send_response(Socket, [{<<"no_result">>, true}]),
+          {stop, normal, State};
+        {ok, Result} ->
+          send_response(Socket, format_result(Result)),
+          {stop, normal, State};
+        {wait, MonRef} ->
+          NewState = State#state{
+            request = Req,
+            skip_stream = all,
+            job_monitor = MonRef
+          },
+          {noreply, NewState}
+      end;
+    #req{op = follow_stream, args = [JobID], opts = Opts} = Req ->
       put('$worker_function', follow_stream),
-      % TODO: handle this without calling another module
-      {Module, NewState} = execute_follow_stream(Socket, JobID, Opts),
-      gen_server:enter_loop(Module, [], NewState, 0);
+      case execute_follow_stream(JobID, Opts) of
+        {follow, Handle, Since, MonRef} ->
+          harpcaller_log:info("job still running, reading the stream result"),
+          SkipUntil = read_and_send_stream_since(Handle, Since, Socket),
+          harp_sdb:close(Handle),
+          NewState = State#state{
+            request = Req,
+            skip_stream = SkipUntil,
+            job_monitor = MonRef
+          },
+          {noreply, NewState};
+        {terminated, Handle, Since, Result} ->
+          harpcaller_log:info("job is already finished, returning result"),
+          read_and_send_stream_since(Handle, Since, Socket),
+          harp_sdb:close(Handle),
+          send_response(Socket, format_result(Result)),
+          {stop, normal, State}
+      end;
     #req{op = read_stream, args = [JobID], opts = Opts} ->
       put('$worker_function', read_stream),
-      % TODO: handle this without calling another module
-      {Module, NewState} = execute_read_stream(Socket, JobID, Opts),
-      gen_server:enter_loop(Module, [], NewState, 0)
+      {ok, Handle, Since} = execute_read_stream(JobID, Opts),
+      read_and_send_stream_since(Handle, Since, Socket),
+      case harp_sdb:result(Handle) of
+        still_running ->
+          send_response(Socket, [{<<"continue">>, true}]);
+        Result ->
+          send_response(Socket, format_result(Result))
+      end,
+      harp_sdb:close(Handle),
+      {stop, normal, State}
   end;
 
 handle_info({tcp_closed, Socket} = _Message,
-            State = #state{socket = Socket}) ->
+            State = #state{socket = Socket, request = undefined}) ->
   harpcaller_log:info("no request read"),
   {stop, normal, State};
 
 handle_info({tcp_error, Socket, Reason} = _Message,
-            State = #state{socket = Socket}) ->
+            State = #state{socket = Socket, request = undefined}) ->
   harpcaller_log:warn("request reading error", [{error, {term, Reason}}]),
+  {stop, normal, State};
+
+handle_info({tcp, Socket, _Line} = _Message,
+            State = #state{socket = Socket, request = #req{}}) ->
+  harpcaller_log:warn("unexpected data after reading request"),
+  {stop, normal, State};
+
+handle_info({tcp_closed, Socket} = _Message,
+            State = #state{socket = Socket, request = #req{}}) ->
+  {stop, normal, State};
+
+handle_info({tcp_error, Socket, _Reason} = _Message,
+            State = #state{socket = Socket, request = #req{}}) ->
   {stop, normal, State};
 
 %% unknown messages
@@ -469,16 +549,35 @@ execute_get_status(JobID) ->
 %% @doc Prepare a {@link gen_server} module and its state for getting job's
 %%   end result.
 
--spec execute_get_result(gen_tcp:socket(), harpcaller:job_id(),
-                         [{atom(), term()}]) ->
-  {module(), NewState :: term()}.
+-spec execute_get_result(harpcaller:job_id(), [{atom(), term()}]) ->
+  {ok, Result} | {wait, Monitor :: reference()}
+  when Result :: {return, harp:result()}
+               | still_running
+               | cancelled
+               | missing
+               | {exception, harp:error_description()}
+               | {error, harp:error_description() | term()}
+               | undefined.
 
-execute_get_result(Socket, JobID, Opts) ->
+execute_get_result(JobID, Opts) ->
   Wait = proplists:get_bool(wait, Opts),
-  harpcaller_log:append_context([{job, {str, JobID}}]),
-  harpcaller_log:info("get job's result", [{wait, Wait}]),
-  NewState = harpcaller_tcp_return_result:state(Socket, JobID, Wait),
-  {harpcaller_tcp_return_result, NewState}.
+  harpcaller_log:append_context([{job, {str, JobID}}, {wait, Wait}]),
+  harpcaller_log:info("get job's result"),
+  case Wait of
+    true ->
+      case harpcaller_caller:follow_stream(JobID) of
+        {ok, MonRef} ->
+          harpcaller_log:info("job still running, waiting for the result"),
+          {wait, MonRef};
+        % NOTE: this can't return `still_running', as monitor couldn't be set
+        undefined ->
+          harpcaller_log:info("returning job's result"),
+          {ok, harpcaller_caller:get_result(JobID)}
+      end;
+    false ->
+      harpcaller_log:info("returning job's result"),
+      {ok, harpcaller_caller:get_result(JobID)}
+  end.
 
 %% }}}
 %%----------------------------------------------------------
@@ -487,20 +586,39 @@ execute_get_result(Socket, JobID, Opts) ->
 %% @doc Prepare a {@link gen_server} module and its state for following job's
 %%   stream result.
 
--spec execute_follow_stream(gen_tcp:socket(), harpcaller:job_id(),
-                            [{atom(), term()}]) ->
-  {module(), NewState :: term()}.
+-spec execute_follow_stream(harpcaller:job_id(), [{atom(), term()}]) ->
+    {follow, Handle, Since, Monitor}
+  | {terminated, Handle, Since, Result}
+  when Handle :: harp_sdb:handle(),
+       Since :: non_neg_integer(),
+       Monitor :: reference(),
+       Result :: {return, harp:result()}
+               | cancelled
+               | missing
+               | {exception, harp:error_description()}
+               | {error, harp:error_description() | term()}
+               | undefined.
 
-execute_follow_stream(Socket, JobID, Opts) ->
-  harpcaller_log:append_context([{job, {str, JobID}}]),
+execute_follow_stream(JobID, Opts) ->
+  harpcaller_log:append_context([{job, {str, JobID}}, {wait, true}]),
   harpcaller_log:info("follow job's streamed result"),
+  {ok, Handle} = harp_sdb:load(JobID), % TODO: handle errors
   case Opts of
-    [{since = Mode, N}] -> ok;
-    [{recent = Mode, N}] -> ok
+    [{since, Since}] ->
+      ok;
+    [{recent, N}] ->
+      Since = max(0, harp_sdb:stream_size(Handle) - N)
   end,
-  NewState = harpcaller_tcp_return_stream:state(Socket, JobID, follow,
-                                                {Mode, N}),
-  {harpcaller_tcp_return_stream, NewState}.
+  case harpcaller_caller:follow_stream(JobID) of
+    {ok, MonRef} ->
+      {follow, Handle, Since, MonRef};
+    undefined ->
+      % XXX: this shouldn't return `still_running' (which means SDB still has
+      % writer), because `follow_stream()' didn't set the monitor, so there's
+      % no SDB writer
+      Result = harp_sdb:result(Handle),
+      {terminated, Handle, Since, Result}
+  end.
 
 %% }}}
 %%----------------------------------------------------------
@@ -509,20 +627,20 @@ execute_follow_stream(Socket, JobID, Opts) ->
 %% @doc Prepare a {@link gen_server} module and its state for reading job's
 %%   stream result.
 
--spec execute_read_stream(gen_tcp:socket(), harpcaller:job_id(),
-                          [{atom(), term()}]) ->
-  {module(), NewState :: term()}.
+-spec execute_read_stream(harpcaller:job_id(), [{atom(), term()}]) ->
+  {ok, Handle :: harp_sdb:handle(), Since :: non_neg_integer()}.
 
-execute_read_stream(Socket, JobID, Opts) ->
-  harpcaller_log:append_context([{job, {str, JobID}}]),
-  harpcaller_log:info("follow job's streamed result"),
+execute_read_stream(JobID, Opts) ->
+  harpcaller_log:append_context([{job, {str, JobID}}, {wait, false}]),
+  harpcaller_log:info("returning job's result"),
+  {ok, Handle} = harp_sdb:load(JobID), % TODO: handle errors
   case Opts of
-    [{since = Mode, N}] -> ok;
-    [{recent = Mode, N}] -> ok
+    [{since, Since}] ->
+      ok;
+    [{recent, N}] ->
+      Since = max(0, harp_sdb:stream_size(Handle) - N)
   end,
-  NewState = harpcaller_tcp_return_stream:state(Socket, JobID, read,
-                                                {Mode, N}),
-  {harpcaller_tcp_return_stream, NewState}.
+  {ok, Handle, Since}.
 
 %% }}}
 %%----------------------------------------------------------
@@ -534,12 +652,71 @@ execute_read_stream(Socket, JobID, Opts) ->
 %% @doc Encode a structure and send it as a response to client.
 
 -spec send_response(gen_tcp:socket(), harp_json:jhash()) ->
-  ok.
+  ok | {error, inet:posix()}.
 
 send_response(Socket, Response) ->
   {ok, Line} = harp_json:encode(Response),
-  ok = gen_tcp:send(Socket, [Line, $\n]),
-  ok.
+  gen_tcp:send(Socket, [Line, $\n]).
+
+%% @doc Read stream result from SDB handle and send it to TCP client.
+%%
+%%   Function returns the next stream record ID to be sent to client (the
+%%   first one that wasn't present in the SDB file).
+
+-spec read_and_send_stream_since(harp_sdb:handle(), non_neg_integer(),
+                                 gen_tcp:socket()) ->
+  non_neg_integer().
+
+read_and_send_stream_since(Handle, Seq, Socket) ->
+  case harp_sdb:stream(Handle, Seq) of
+    {ok, Rec} ->
+      % TODO: handle errors
+      ok = send_response(Socket, [{<<"packet">>, Seq}, {<<"data">>, Rec}]),
+      read_and_send_stream_since(Handle, Seq + 1, Socket);
+    still_running ->
+      Seq;
+    end_of_stream ->
+      Seq
+  end.
+
+%% @doc Format result for sending to TCP client.
+
+format_result({return, Value} = _Result) ->
+  [{<<"result">>, Value}];
+
+%format_result(still_running = _Result) ->
+%  ...; % this should never happen
+
+format_result(cancelled = _Result) ->
+  [{<<"cancelled">>, true}];
+
+format_result(missing = _Result) ->
+  format_result({error, {<<"missing_result">>,
+                          <<"job interrupted abruptly">>}});
+
+format_result({exception, {Type, Message}} = _Result) ->
+  [{<<"exception">>,
+    [{<<"type">>, Type}, {<<"message">>, Message}]}];
+format_result({exception, {Type, Message, Data}} = _Result) ->
+  [{<<"exception">>,
+    [{<<"type">>, Type}, {<<"message">>, Message}, {<<"data">>, Data}]}];
+
+format_result({error, {Type, Message}} = _Result)
+when is_binary(Type), is_binary(Message) ->
+  [{<<"error">>,
+    [{<<"type">>, Type}, {<<"message">>, Message}]}];
+format_result({error, {Type, Message, Data}} = _Result)
+when is_binary(Type), is_binary(Message) ->
+  [{<<"error">>,
+    [{<<"type">>, Type}, {<<"message">>, Message}, {<<"data">>, Data}]}];
+format_result({error, Reason} = _Result) ->
+  Type = iolist_to_binary(harpcaller_caller:error_type(Reason)),
+  Message = iolist_to_binary(harpcaller_caller:format_error(Reason)),
+  [{<<"error">>, [{<<"type">>, Type}, {<<"message">>, Message}]}];
+
+format_result(undefined = _Result) ->
+  % no such job
+  format_result({error, {<<"invalid_jobid">>, <<"no job with this ID">>}}).
 
 %% @doc Format IP address and port number for logging.
 
