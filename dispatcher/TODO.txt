@@ -21,5 +21,3 @@ time:
 
 == code internals ==
 
-  * harpcaller_caller and harpcaller_tcp_return_{result,stream}: refactoring
-  * harpcaller_caller: when dies, log this (harpcaller_log:error())
