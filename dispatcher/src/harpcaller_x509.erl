@@ -32,7 +32,7 @@
 %% @doc Load certificates from a PEM file.
 
 -spec read_cert_file(file:filename()) ->
-  {ok, [certificate()]} | {error, term()}.
+  {ok, [certificate()]} | {error, file:posix()}.
 
 read_cert_file(CertFile) ->
   case file:read_file(CertFile) of
