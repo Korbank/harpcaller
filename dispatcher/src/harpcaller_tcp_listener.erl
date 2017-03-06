@@ -9,7 +9,7 @@
 -behaviour(gen_server).
 
 %% supervision tree API
--export([start/1, start_link/1]).
+-export([start/2, start_link/2]).
 
 %% config reloading
 -export([rebind/1, shutdown/1]).
@@ -40,13 +40,13 @@
 %% @private
 %% @doc Start acceptor process.
 
-start({Addr, Port} = _ListenSpec) ->
+start(Addr, Port) ->
   gen_server:start(?MODULE, [Addr, Port], []).
 
 %% @private
 %% @doc Start acceptor process.
 
-start_link({Addr, Port} = _ListenSpec) ->
+start_link(Addr, Port) ->
   gen_server:start_link(?MODULE, [Addr, Port], []).
 
 %%%---------------------------------------------------------------------------
