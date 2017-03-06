@@ -10,7 +10,7 @@ Synopsis
     harpcallerd [options] start
     harpcallerd [options] status
     harpcallerd [options] stop
-    harpcallerd [options] reload-config
+    harpcallerd [options] reload
     harpcallerd [options] dist-erl-start
     harpcallerd [options] dist-erl-stop
     harpcallerd [options] list
@@ -121,9 +121,9 @@ Controlling the daemon
 
       If specified, PID reported by the daemon is printed to screen.
 
-.. program:: harpcallerd reload-config
+.. program:: harpcallerd reload
 
-``harpcallerd reload-config``
+``harpcallerd reload``
    Reload :ref:`configuration file <harpcaller-config-file>`.
 
 .. program:: harpcallerd dist-erl-start

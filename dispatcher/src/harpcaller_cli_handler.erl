@@ -331,7 +331,7 @@ help(Script) ->
     "  ", Script, " [--socket=...] start [--debug] [--config=...] [--pidfile=...]\n",
     "  ", Script, " [--socket=...] status [--wait [--timeout=...]]\n",
     "  ", Script, " [--socket=...] stop [--timeout=...] [--print-pid]\n",
-    "  ", Script, " [--socket=...] reload-config\n",
+    "  ", Script, " [--socket=...] reload\n",
     "Jobs:\n",
     "  ", Script, " [--socket=...] list\n",
     "  ", Script, " [--socket=...] info <job-id>\n",
@@ -657,7 +657,7 @@ cli_opt(Arg, Opts = #opts{op = undefined}) ->
     "start"  -> Opts#opts{op = start};
     "status" -> Opts#opts{op = status};
     "stop"   -> Opts#opts{op = stop};
-    "reload-config" -> Opts#opts{op = reload_config};
+    "reload" -> Opts#opts{op = reload_config};
     "prune-jobs"  -> Opts#opts{op = prune_jobs};
     "reopen-logs" -> Opts#opts{op = reopen_logs};
     "dist-erl-start" -> Opts#opts{op = dist_start};
