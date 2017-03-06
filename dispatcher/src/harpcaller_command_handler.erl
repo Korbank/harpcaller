@@ -86,9 +86,18 @@ handle_command([{<<"command">>, <<"reopen_logs">>}] = _Command, _Args) ->
 %%----------------------------------------------------------
 %% RPC job control
 
-handle_command([{<<"command">>, <<"list_jobs">>}] = _Command, _Args) ->
-  Jobs = list_jobs_info(),
-  [{result, ok}, {jobs, Jobs}];
+handle_command([{<<"command">>, <<"list_jobs">>},
+                {<<"list_all">>, AllJobs}] = _Command, _Args) ->
+  case AllJobs of
+    true ->
+      Jobs = list_recorded_jobs_info(),
+      [{result, ok}, {jobs, Jobs}];
+    false ->
+      Jobs = list_running_jobs_info(),
+      [{result, ok}, {jobs, Jobs}];
+    _ ->
+      [{result, error}, {message, <<"unrecognized command">>}]
+  end;
 
 handle_command([{<<"command">>, <<"cancel_job">>},
                 {<<"job">>, JobID}] = _Command, _Args) ->
@@ -185,8 +194,8 @@ format_request(reopen_logs   = Command) -> [{command, Command}];
 format_request(dist_start    = Command) -> [{command, Command}];
 format_request(dist_stop     = Command) -> [{command, Command}];
 
-format_request(list_jobs) ->
-  [{command, list_jobs}];
+format_request({list_jobs, AllJobs}) ->
+  [{command, list_jobs}, {list_all, AllJobs}];
 format_request({cancel_job, JobID}) when is_list(JobID) ->
   format_request({cancel_job, list_to_binary(JobID)});
 format_request({cancel_job, JobID}) when is_binary(JobID) ->
@@ -283,7 +292,7 @@ is_started() ->
   AppEntry = lists:keyfind(harpcaller, 1, application:which_applications()),
   AppEntry /= false.
 
-list_jobs_info() ->
+list_running_jobs_info() ->
   _Result = [
     pid_job_info(Pid) ||
     {_,Pid,_,_} <- supervisor:which_children(harpcaller_caller_sup)
@@ -295,11 +304,13 @@ pid_job_info(Pid) ->
   {ok, JobID} = harpcaller_caller:job_id(Pid),
   job_info(JobID).
 
+list_recorded_jobs_info() ->
+  _Result = [job_info(JobID) || JobID <- harp_sdb:list()].
+
 job_info(JobID) ->
   case harpcaller_caller:get_call_info(JobID) of
     {ok, {{ProcName, ProcArgs} = _ProcInfo, Host,
           {SubmitTime, StartTime, EndTime} = _TimeInfo, _CallInfo}} ->
-      % TODO: use `CallInfo'
       _JobInfo = [
         {<<"job">>, list_to_binary(JobID)},
         {<<"call">>, [

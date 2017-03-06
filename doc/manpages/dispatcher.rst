@@ -153,7 +153,7 @@ Controlling call jobs
 
 .. program:: harpcallerd list
 
-``harpcallerd list``
+``harpcallerd list [--all] [--queue]``
    List jobs currently running or waiting for their turn in some queue.
 
    Output is a list of JSON hashes, one per line. The hashes have following
@@ -176,6 +176,15 @@ Controlling call jobs
       }
 
    Job identifier (``"job"`` value) is always in UUID string format.
+
+   .. option:: --all
+
+      List all recorded jobs, including terminated.
+
+   .. option:: --queue
+
+      Along with the running job, list the queue it belongs to (under the
+      ``"queue"`` field).
 
 .. program:: harpcallerd info
 

@@ -184,6 +184,10 @@ format_request(prune_jobs = _Command, _Options = #opts{options = CLIOpts}) ->
   Age = proplists:get_value(age, CLIOpts),
   Request = ?ADMIN_COMMAND_MODULE:format_request({prune_jobs, Age}),
   {ok, Request};
+format_request(list_jobs = _Command, _Options = #opts{options = CLIOpts}) ->
+  AllJobs = proplists:get_bool(all, CLIOpts),
+  Request = ?ADMIN_COMMAND_MODULE:format_request({list_jobs, AllJobs}),
+  {ok, Request};
 format_request(Command, _Options) ->
   Request = ?ADMIN_COMMAND_MODULE:format_request(Command),
   {ok, Request}.
@@ -226,10 +230,21 @@ handle_reply(Reply, reload_config = Command, _Options) ->
       {error, 1}
   end;
 
-handle_reply(Reply, list_jobs = Command, _Options) ->
+handle_reply(Reply, list_jobs = Command, _Options = #opts{options = CLIOpts}) ->
   case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
-    {ok, Jobs} -> lists:foreach(fun print_json/1, Jobs), ok;
-    {error, Reason} -> {error, Reason}
+    {ok, Jobs} ->
+      case proplists:get_bool(queue, CLIOpts) of
+        true ->
+          lists:foreach(fun print_json/1, Jobs);
+        false ->
+          lists:foreach(
+            fun(J) -> print_json(proplists:delete(<<"queue">>, J)) end,
+            Jobs
+          )
+      end,
+      ok;
+    {error, Reason} ->
+      {error, Reason}
   end;
 
 handle_reply(Reply, {job_info, _} = Command, _Options) ->
@@ -345,7 +360,7 @@ help(Script) ->
     "  ", Script, " [--socket=...] stop [--timeout=...] [--print-pid]\n",
     "  ", Script, " [--socket=...] reload\n",
     "Jobs:\n",
-    "  ", Script, " [--socket=...] list\n",
+    "  ", Script, " [--socket=...] list [--all] [--queue]\n",
     "  ", Script, " [--socket=...] info <job-id>\n",
     "  ", Script, " [--socket=...] cancel <job-id>\n",
     "Job queues:\n",
@@ -660,6 +675,12 @@ cli_opt("--wait" = _Arg, Opts = #opts{options = CLIOpts}) ->
 
 cli_opt("--print-pid" = _Arg, Opts = #opts{options = CLIOpts}) ->
   _NewOpts = Opts#opts{options = [{print_pid, true} | CLIOpts]};
+
+cli_opt("--all" = _Arg, Opts = #opts{options = CLIOpts}) ->
+  _NewOpts = Opts#opts{options = [{all, true} | CLIOpts]};
+
+cli_opt("--queue" = _Arg, Opts = #opts{options = CLIOpts}) ->
+  _NewOpts = Opts#opts{options = [{queue, true} | CLIOpts]};
 
 cli_opt("-" ++ _ = _Arg, _Opts) ->
   {error, bad_option};
