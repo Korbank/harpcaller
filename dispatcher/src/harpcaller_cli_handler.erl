@@ -16,6 +16,8 @@
 -export([format_error/1]).
 -export([help/1]).
 
+-export([load_app_config/2]).
+
 %% gen_indira_cli callbacks
 -export([parse_arguments/2]).
 -export([handle_command/2, format_request/2, handle_reply/3]).
@@ -101,6 +103,8 @@ handle_command(start = _Command,
   ConfigFile = proplists:get_value(config, CLIOpts),
   case read_config_file(ConfigFile) of
     {ok, Config} ->
+      indira_app:set_option(harpcaller, configure,
+                            {?MODULE, load_app_config, [ConfigFile, Options]}),
       case setup_applications(Config, Options) of
         {ok, IndiraOptions} ->
           indira_app:daemonize(harpcaller, [
@@ -723,6 +727,187 @@ println(Line) ->
 print_json(Struct) ->
   {ok, JSON} = indira_json:encode(Struct),
   io:put_chars([JSON, $\n]).
+%% }}}
+%%----------------------------------------------------------
+
+%%%---------------------------------------------------------------------------
+
+%% @doc Load and set `harpcaller' application config from a config file.
+%%
+%%   Function intended for use in reloading config in the runtime.
+%%
+%%   Errors are formatted with {@link format_error/1}.
+
+-spec load_app_config(file:filename(), #opts{}) ->
+  ok | {error, Message :: binary()}.
+
+load_app_config(ConfigFile, Options) ->
+  case read_config_file(ConfigFile) of
+    {ok, Config} ->
+      % FIXME: for the two options (`stream_directory' and `host_db_script')
+      % that (a) are mandatory, (b) have no default values, and (c) take
+      % effect immediately after being set, we're just assuming that they are
+      % present in configuration file
+      ok = reset_harpcaller_config(),
+      case configure_harpcaller(config_defaults(Config), Options) of
+        ok ->
+          ok = reset_harpcaller_unset_options(Config),
+          case load_error_logger_config(Config, Options) of
+            ok -> load_indira_config(Config, Options);
+            {error, Message} -> {error, Message}
+          end;
+        {error, Reason} ->
+          {error, iolist_to_binary(format_error({configure, Reason}))}
+      end;
+    {error, Reason} ->
+      {error, iolist_to_binary(format_error(Reason))}
+  end.
+
+%%----------------------------------------------------------
+%% load_error_logger_config() {{{
+
+%% @doc Set destination file for {@link error_logger}/{@link
+%%   indira_disk_h}.
+%%
+%% @see load_app_config/2
+
+-spec load_error_logger_config(config(), #opts{}) ->
+  ok | {error, Message :: binary()}.
+
+load_error_logger_config(Config, _Options) ->
+  ErlangConfig = proplists:get_value(<<"erlang">>, Config, []),
+  case proplists:get_value(<<"log_file">>, ErlangConfig) of
+    File when is_binary(File) ->
+      ok = indira_app:set_option(harpcaller, error_logger_file, File);
+    undefined ->
+      ok = application:unset_env(harpcaller, error_logger_file);
+    _ ->
+      {error, iolist_to_binary(format_error({configure, bad_config}))}
+  end.
+
+%% }}}
+%%----------------------------------------------------------
+%% load_indira_config() {{{
+
+%% @doc Reconfigure Indira's network configuration for Erlang.
+%%
+%% @see load_app_config/2
+
+-spec load_indira_config(config(), #opts{}) ->
+  ok | {error, Message :: binary()}.
+
+load_indira_config(Config, Options) ->
+  case prepare_indira_options(Config, Options) of
+    {ok, IndiraOptions} ->
+      case indira_app:distributed_reconfigure(IndiraOptions) of
+        ok ->
+          ok;
+        {error, invalid_net_config = _Reason} ->
+          {error, <<"invalid network configuration">>};
+        {error, Reason} ->
+          Message = io_lib:format("Erlang network reloading error: ~1024p",
+                                  [Reason]),
+          {error, iolist_to_binary(Message)}
+      end;
+    {error, bad_option} ->
+      % errors in "[erlang]" section
+      {error, iolist_to_binary(format_error({configure, bad_option}))}
+  end.
+
+%% }}}
+%%----------------------------------------------------------
+%% reset_harpcaller_config() {{{
+
+%% @doc Reset `harpcaller' application's environment to default values.
+%%
+%%   Two types of keys are omitted: `configure', which is not really
+%%   a configuration setting (keeps "config reload" function for later use)
+%%   and the keys that cannot be reset freely to an arbitrary temporary value
+%%   (because they are immediately used).
+%%
+%% @see config_defaults/1
+
+reset_harpcaller_config() ->
+  CurrentConfig = [
+    Entry ||
+    {Key, _} = Entry <- application:get_all_env(harpcaller),
+    Key /= configure, % not really part of the configuration
+    % these are immediately used, so they need special care
+    Key /= ca_file,
+    Key /= known_certs_file,
+    Key /= stream_directory,
+    Key /= host_db_script,
+    Key /= host_db_refresh,
+    Key /= default_timeout,
+    Key /= max_exec_time
+  ],
+  DefaultConfig = dict:from_list(harpcaller_default_env()),
+  lists:foreach(
+    fun({Key, _}) ->
+      case dict:find(Key, DefaultConfig) of
+        {ok, Value} -> application:set_env(harpcaller, Key, Value);
+        error -> application:unset_env(harpcaller, Key)
+      end
+    end,
+    CurrentConfig
+  ),
+  ok.
+
+%% @doc Unset `harpcaller' non-mandatory options that were not set in the
+%%   config.
+
+reset_harpcaller_unset_options(Config) ->
+  case proplists:get_value(<<"ca_file">>, Config) of
+    undefined -> application:unset_env(harpcaller, ca_file);
+    _ -> ok
+  end,
+  case proplists:get_value(<<"known_certs_file">>, Config) of
+    undefined -> application:unset_env(harpcaller, known_certs_file);
+    _ -> ok
+  end,
+  ok.
+
+%% }}}
+%%----------------------------------------------------------
+%% config_defaults() {{{
+
+%% @doc Populate config read from TOML file with values default for
+%%   `harpcaller' application.
+%%
+%%   This function is used for reloading config and only works for settings
+%%   that cannot be freely reset to default, because they're used immediately.
+%%
+%% @see reset_harpcaller_config/0
+
+-spec config_defaults(config()) ->
+  config().
+
+config_defaults(Config) ->
+  Defaults = harpcaller_default_env(),
+  % it's a proplist and the first occurrence of the key is used, so appending
+  % defaults is a good idea
+  Config ++ [
+    % these settings have no default values
+    %{<<"ca_file">>,          proplists:get_value(ca_file,          Defaults)},
+    %{<<"known_certs_file">>, proplists:get_value(known_certs_file, Defaults)},
+    %{<<"stream_directory">>, proplists:get_value(stream_directory, Defaults)},
+    %{<<"host_db_script">>,   proplists:get_value(host_db_script,   Defaults)},
+    {<<"host_db_refresh">>,  proplists:get_value(host_db_refresh,  Defaults)},
+    {<<"default_timeout">>,  proplists:get_value(default_timeout,  Defaults)},
+    {<<"max_exec_time">>,    proplists:get_value(max_exec_time,    Defaults)}
+  ].
+
+%% }}}
+%%----------------------------------------------------------
+%% harpcaller_default_env() {{{
+
+%% @doc Extract application's default environment from `harpcaller.app' file.
+
+harpcaller_default_env() ->
+  StatipAppFile = filename:join(code:lib_dir(harpcaller, ebin), "harpcaller.app"),
+  {ok, [{application, harpcaller, AppKeys}]} = file:consult(StatipAppFile),
+  proplists:get_value(env, AppKeys).
+
 %% }}}
 %%----------------------------------------------------------
 

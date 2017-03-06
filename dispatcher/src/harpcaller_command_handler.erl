@@ -43,8 +43,24 @@ handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
   [{result, ok}, {pid, list_to_binary(os:getpid())}];
 
 handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
-  log_info(reload_config, "reloading configuration (TODO)", []),
-  [{result, error}, {message, <<"command not implemented yet">>}];
+  log_info(reload, "reloading configuration", []),
+  case reload_config() of
+    ok ->
+      case [{N, format_term(E)} || {N, {error, E}} <- reload_processes()] of
+        [] ->
+          unlock_reload(),
+          [{result, ok}];
+        Errors ->
+          unlock_reload(),
+          log_error(reload, "errors when applying new config",
+                    [{errors, Errors}]),
+          [{result, error}, {errors, Errors}]
+      end;
+    {error, Message} ->
+      unlock_reload(),
+      log_error(reload, "config reload error", [{error, Message}]),
+      [{result, error}, {message, Message}]
+  end;
 
 %%----------------------------------------------------------
 %% Log handling/rotation
@@ -348,6 +364,51 @@ reopen_error_logger_file() ->
 
 %%%---------------------------------------------------------------------------
 
+-spec reload_config() ->
+  ok | {error, binary()}.
+
+reload_config() ->
+  try register('$harpcaller_admin_reload_config', self()) of
+    true ->
+      case application:get_env(harpcaller, configure) of
+        {ok, {Module, Function, Args}} ->
+          case apply(Module, Function, Args) of
+            ok -> ok;
+            {error, Message} when is_binary(Message) -> {error, Message};
+            % in case some error slipped in in raw form
+            {error, Reason} -> {error, format_term(Reason)}
+          end;
+        undefined ->
+          {error, <<"not configured from file">>}
+      end
+  catch
+    error:badarg ->
+      {error, <<"reload command already in progress">>}
+  end.
+
+unlock_reload() ->
+  unregister('$harpcaller_admin_reload_config'),
+  ok.
+
+-spec reload_processes() ->
+  [{Part, Result}]
+  when Part :: dist_erl | error_logger | logger
+             | tcp_listen | x509_store | hostdb,
+       Result :: ok | {error, term()}.
+
+reload_processes() ->
+  {ok, LogHandlers} = application:get_env(harpcaller, log_handlers),
+  _Results = [
+    %{dist_erl, ...}, % already reloaded when config was applied
+    {error_logger, reopen_error_logger_file()},
+    {logger,     harpcaller_log:reload(LogHandlers)},
+    {tcp_listen, harpcaller_tcp_sup:reload()},
+    {x509_store, harpcaller_x509_store:reload()},
+    {hostdb,     harpcaller_hostdb:reopen()}
+  ].
+
+%%%---------------------------------------------------------------------------
+
 -spec log_info(atom(), harpcaller_log:event_message(),
                harpcaller_log:event_info()) ->
   ok.
@@ -361,6 +422,14 @@ log_info(Command, Message, Context) ->
 
 log_error(Command, Message, Context) ->
   harpcaller_log:warn(command, Message, Context ++ [{command, {term, Command}}]).
+
+-spec format_term(any()) ->
+  binary().
+
+format_term(Term) when is_binary(Term) ->
+  Term;
+format_term(Term) ->
+  iolist_to_binary(io_lib:print(Term, 1, 16#ffffffff, -1)).
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

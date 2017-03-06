@@ -126,8 +126,6 @@ Controlling the daemon
 ``harpcallerd reload-config``
    Reload :ref:`configuration file <harpcaller-config-file>`.
 
-   **NOTE**: This command is not implemented yet.
-
 .. program:: harpcallerd dist-erl-start
 
 ``harpcallerd dist-erl-start``
