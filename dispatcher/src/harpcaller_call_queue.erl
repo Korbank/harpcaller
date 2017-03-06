@@ -26,7 +26,7 @@
 %%%---------------------------------------------------------------------------
 %%% type specification/documentation {{{
 
--type queue_name() :: term().
+-type queue_name() :: harp_json:jhash().
 
 -record(state, {
   q :: ets:tab(),     % running and queued objects
