@@ -28,7 +28,10 @@
 -export([to_string/1]).
 
 %% supervision tree API
--export([start/0, start_link/0]).
+-export([start/1, start_link/1]).
+
+%% config reloading
+-export([reload/1]).
 
 -export_type([event_type/0, event_info/0, event_message/0]).
 
@@ -300,11 +303,17 @@ struct_or_string(Entry) ->
 %% @private
 %% @doc Start log collector process.
 
-start() ->
+-spec start([{gen_event:handler(), gen_event:handler_args()}]) ->
+  {ok, pid()} | {error, Reason}
+  when Reason :: {gen_event:handler(), term()}
+               | {exit, gen_event:handler(), term()}
+               | {already_started, pid()}.
+
+start(Handlers) ->
   case gen_event:start({local, ?MODULE}) of
     {ok, Pid} ->
-      case add_handlers(Pid, get_handlers()) of
-        ok ->
+      case sync_handlers(Pid, Handlers) of
+        {ok, _ReloadCandidates} ->
           {ok, Pid};
         {error, Reason} ->
           gen_event:stop(Pid),
@@ -317,11 +326,17 @@ start() ->
 %% @private
 %% @doc Start log collector process.
 
-start_link() ->
+-spec start_link([{gen_event:handler(), gen_event:handler_args()}]) ->
+  {ok, pid()} | {error, Reason}
+  when Reason :: {gen_event:handler(), term()}
+               | {exit, gen_event:handler(), term()}
+               | {already_started, pid()}.
+
+start_link(Handlers) ->
   case gen_event:start_link({local, ?MODULE}) of
     {ok, Pid} ->
-      case add_handlers(Pid, get_handlers()) of
-        ok ->
+      case sync_handlers(Pid, Handlers) of
+        {ok, _ReloadCandidates} ->
           {ok, Pid};
         {error, Reason} ->
           gen_event:stop(Pid),
@@ -331,30 +346,69 @@ start_link() ->
       {error, Reason}
   end.
 
-%% @doc Get handlers defined in application environment.
+%% @doc Reload list of event handlers, adding missing and removing excessive
+%%   ones.
+%%
+%%   Function returns a list of handlers from `ExpectedHandlers' that already
+%%   were present in event manager. These are the candidates for being
+%%   reloaded.
 
--spec get_handlers() ->
-  [{atom(), term()}].
+-spec reload([{gen_event:handler(), gen_event:handler_args()}]) ->
+  {ok, ReloadCandidates} | {error, Reason}
+  when ReloadCandidates :: [gen_event:handler()],
+       Reason :: {gen_event:handler(), term()}
+               | {exit, gen_event:handler(), term()}.
 
-get_handlers() ->
-  case application:get_env(harpcaller, log_handlers) of
-    {ok, LogHandlers} -> LogHandlers;
-    undefined -> []
+reload(ExpectedHandlers) ->
+  case sync_handlers(whereis(?MODULE), ExpectedHandlers) of
+    {ok, {ExistingSet, ExpectedSet}} ->
+      ReloadCandidates = sets:intersection(ExistingSet, ExpectedSet),
+      {ok, sets:to_list(ReloadCandidates)};
+    {error, Reason} ->
+      {error, Reason}
   end.
 
-%% @doc Add event handlers to gen_event.
+%%%---------------------------------------------------------------------------
 
--spec add_handlers(pid(), [{atom(), term()}]) ->
-  ok | {error, term()}.
+-spec sync_handlers(pid(), [{gen_event:handler(),gen_event:handler_args()}]) ->
+  {ok, {ExistingSet :: set(), ExpectedSet :: set()}} | {error, Reason}
+  when Reason :: {gen_event:handler(), term()}
+               | {exit, gen_event:handler(), term()}.
 
-add_handlers(_Pid, [] = _Handlers) ->
+sync_handlers(Pid, ExpectedHandlers) ->
+  ExpectedSet = sets:from_list([H || {H, _Args} <- ExpectedHandlers]),
+  ExistingSet = sets:from_list(gen_event:which_handlers(Pid)),
+  case add_missing(ExpectedHandlers, Pid, ExistingSet) of
+    ok ->
+      % XXX: remove_excessive() always succeeds
+      ok = remove_excessive(Pid, sets:subtract(ExistingSet, ExpectedSet)),
+      {ok, {ExistingSet, ExpectedSet}};
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+add_missing([] = _ExpectedHandlers, _Pid, _ExistingSet) ->
   ok;
-add_handlers(Pid, [{Mod, Args} | Rest] = _Handlers) ->
-  case gen_event:add_handler(Pid, Mod, Args) of
-    ok -> add_handlers(Pid, Rest);
-    {error, Reason} -> {error, {Mod, Reason}};
-    {'EXIT', Reason} -> {error, {exit, Mod, Reason}}
+add_missing([{H, Args} | Rest] = _ExpectedHandlers, Pid, ExistingSet) ->
+  case sets:is_element(H, ExistingSet) of
+    true ->
+      add_missing(Rest, Pid, ExistingSet);
+    false ->
+      case gen_event:add_handler(Pid, H, Args) of
+        ok -> add_missing(Rest, Pid, ExistingSet);
+        {error, Reason} -> {error, {H, Reason}};
+        {'EXIT', Reason} -> {error, {exit, H, Reason}}
+      end
   end.
+
+remove_excessive(Pid, ToRemoveSet) ->
+  % XXX: assume that all handlers are removed successfully
+  sets:fold(fun remove/2, Pid, ToRemoveSet),
+  ok.
+
+remove(Handler, Pid) ->
+  gen_event:delete_handler(Pid, Handler, []),
+  Pid.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

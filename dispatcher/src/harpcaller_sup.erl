@@ -32,9 +32,10 @@ start_link() ->
 %% @doc Initialize supervisor.
 
 init([] = _Args) ->
+  {ok, LogHandlers} = application:get_env(log_handlers),
   Strategy = {one_for_one, 5, 10},
   Children = [
-    {harpcaller_log, {harpcaller_log, start_link, []},
+    {harpcaller_log, {harpcaller_log, start_link, [LogHandlers]},
       permanent, 1000, worker, dynamic},
     {harp_sdb_sup, {harp_sdb_sup, start_link, []},
       permanent, 1000, worker, [harp_sdb_sup]},
