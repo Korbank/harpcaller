@@ -82,26 +82,13 @@ start_link() ->
 %% @doc Initialize event handler.
 
 init([] = _Args) ->
-  case application:get_env(known_certs_file) of
-    {ok, CAFile} ->
-      case read_certs(CAFile) of
-        {ok, Certs, CMTime} ->
-          State = #state{
-            cert_file = CAFile,
-            certs = store(Certs),
-            last_change = CMTime
-          },
-          {ok, State};
-        {error, _Reason} ->
-          State = #state{
-            cert_file = CAFile,
-            certs = store([])
-          },
-          {ok, State}
-      end;
-    undefined ->
+  case reload_x509_store_state() of
+    {ok, State} ->
+      {ok, State};
+    {error, CAFile, _Reason} ->
+      % pretend there's no problem with this
       State = #state{
-        cert_file = undefined,
+        cert_file = CAFile,
         certs = store([])
       },
       {ok, State}
@@ -120,15 +107,11 @@ terminate(_Arg, _State) ->
 %% @private
 %% @doc Handle {@link gen_server:call/2}.
 
-handle_call(reload = _Request, _From, State = #state{cert_file = CAFile}) ->
-  case read_certs(CAFile) of
-    {ok, NewCerts, NewCMTime} ->
-      NewState = State#state{
-        certs = store(NewCerts),
-        last_change = NewCMTime
-      },
+handle_call(reload = _Request, _From, State) ->
+  case reload_x509_store_state() of
+    {ok, NewState} ->
       {reply, ok, NewState};
-    {error, Reason} ->
+    {error, _CAFile, Reason} ->
       {reply, {error, Reason}, State}
   end;
 
@@ -192,10 +175,39 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%%---------------------------------------------------------------------------
 
+%% @doc (Re)load certificate store.
+
+-spec reload_x509_store_state() ->
+  {ok, #state{}} | {error, file:filename(), file:posix()}.
+
+reload_x509_store_state() ->
+  case application:get_env(known_certs_file) of
+    {ok, CAFile} ->
+      case read_certs(CAFile) of
+        {ok, Certs, CMTime} ->
+          State = #state{
+            cert_file = CAFile,
+            certs = store(Certs),
+            last_change = CMTime
+          },
+          {ok, State};
+        {error, Reason} ->
+          {error, CAFile, Reason}
+      end;
+    undefined ->
+      State = #state{
+        cert_file = undefined,
+        certs = store([])
+      },
+      {ok, State}
+  end.
+
+%%%---------------------------------------------------------------------------
+
 %% @doc Read file with known certificates.
 
 -spec read_certs(file:filename()) ->
-    {ok, [harpcaller_x509:certificate()], change_time()} | {error, term()}.
+  {ok, [harpcaller_x509:certificate()], change_time()} | {error, file:posix()}.
 
 read_certs(File) ->
   case harpcaller_x509:read_cert_file(File) of
