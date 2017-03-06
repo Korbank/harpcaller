@@ -353,10 +353,18 @@ submitted_time(File) ->
 
 list() ->
   {ok, Directory} = application:get_env(harpcaller, stream_directory),
-  _Tables = [
-    filename_to_table(File) ||
-    File <- filelib:wildcard(?TABLE_FILE_WILDCARD, Directory)
-  ].
+  {ok, TableNameRE} = re:compile(?TABLE_NAME_RE),
+  lists:foldr(
+    fun(File, Acc) ->
+      TableName = filename_to_table(File),
+      case re:run(TableName, TableNameRE, [{capture, none}]) of
+        match -> [TableName | Acc];
+        nomatch -> Acc
+      end
+    end,
+    [],
+    filelib:wildcard(?TABLE_FILE_WILDCARD, Directory)
+  ).
 
 %% @doc Convert file name to name of a table.
 
