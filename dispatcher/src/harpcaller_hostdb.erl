@@ -111,33 +111,23 @@ start_link() ->
 
 init(_Args) ->
   harpcaller_log:set_context(hostdb, []),
-  {ok, TableFile} = application:get_env(host_db),
-  {ok, Table} = dets:open_file(TableFile, [{type, set}]),
-  State = #state{
-    table = Table
-  },
-  {ok, RefreshInterval} = application:get_env(host_db_refresh),
-  {MS,S,_US} = os:timestamp(),
-  Timestamp = MS * 1000 * 1000 + S,
-  % in case of starting/restarting, wait only half of the usual refresh
-  % interval, otherwise it could grow up to almost twice the refresh, and that
-  % would be a little too much
-  LastUpdateExpected = Timestamp - RefreshInterval div 2,
-  case dets:lookup(Table, updated) of
-    [] ->
-      refresh();
-    [{updated, LastUpdate, _}] when LastUpdate < LastUpdateExpected ->
-      refresh();
-    [{updated, LastUpdate, _}] when LastUpdate >= LastUpdateExpected ->
-      ok
-  end,
-  {ok, State}.
+  case db_open() of
+    {ok, Table, fresh} ->
+      State = #state{table = Table},
+      {ok, State};
+    {ok, Table, old} ->
+      refresh(),
+      State = #state{table = Table},
+      {ok, State};
+    {error, Reason} ->
+      {stop, Reason}
+  end.
 
 %% @private
 %% @doc Clean up after event handler.
 
 terminate(_Arg, _State = #state{table = Table}) ->
-  dets:close(Table),
+  db_close(Table),
   ok.
 
 %% }}}
@@ -169,10 +159,14 @@ handle_call(list_hosts = _Request, _From, State = #state{table = Table}) ->
   {reply, Result, State};
 
 handle_call(reopen = _Request, _From, State = #state{table = OldTable}) ->
-  {ok, TableFile} = application:get_env(host_db),
-  case dets:open_file(TableFile, [{type, set}]) of
-    {ok, NewTable} ->
+  case db_open() of
+    {ok, NewTable, fresh} ->
       dets:close(OldTable),
+      NewState = State#state{table = NewTable},
+      {reply, ok, NewState};
+    {ok, NewTable, old} ->
+      dets:close(OldTable),
+      refresh(),
       NewState = State#state{table = NewTable},
       {reply, ok, NewState};
     {error, Reason} ->
@@ -228,6 +222,44 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% }}}
 %%----------------------------------------------------------
+
+%%%---------------------------------------------------------------------------
+
+%% @doc Open DETS table and check if it is freshly populated with hosts.
+
+-spec db_open() ->
+  {ok, dets:tab_name(), fresh | old} | {error, term()}.
+
+db_open() ->
+  {ok, TableFile} = application:get_env(host_db),
+  {ok, RefreshInterval} = application:get_env(host_db_refresh),
+  case dets:open_file(TableFile, [{type, set}]) of
+    {ok, Table} ->
+      {MS,S,_US} = os:timestamp(),
+      Timestamp = MS * 1000 * 1000 + S,
+      % in case of starting/restarting, wait only half of the usual refresh
+      % interval, otherwise it could grow up to almost twice the refresh, and
+      % that would be a little too much
+      LastUpdateExpected = Timestamp - RefreshInterval div 2,
+      case dets:lookup(Table, updated) of
+        [] ->
+          {ok, Table, old};
+        [{updated, LastUpdate, _}] when LastUpdate < LastUpdateExpected ->
+          {ok, Table, old};
+        [{updated, LastUpdate, _}] when LastUpdate >= LastUpdateExpected ->
+          {ok, Table, fresh}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Close DETS table.
+
+-spec db_close(dets:tab_name()) ->
+  ok.
+
+db_close(Table) ->
+  dets:close(Table).
 
 %%%---------------------------------------------------------------------------
 
