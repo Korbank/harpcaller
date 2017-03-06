@@ -213,6 +213,10 @@ parse_reply([{<<"result">>, <<"ok">>}] = _Reply, _Request) ->
 parse_reply([{<<"message">>, Reason}, {<<"result">>, <<"error">>}] = _Reply,
             _Request) when is_binary(Reason) ->
   {error, Reason};
+parse_reply([{<<"errors">>, [{_,_}|_] = Errors},
+              {<<"result">>, <<"error">>}] = _Reply,
+            reload_config = _Request) ->
+  {error, Errors};
 
 parse_reply([{<<"result">>, <<"running">>}] = _Reply, status = _Request) ->
   running;

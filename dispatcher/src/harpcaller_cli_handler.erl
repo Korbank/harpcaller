@@ -214,6 +214,18 @@ handle_reply(Reply, stop = Command, _Options = #opts{options = CLIOpts}) ->
     {error, Reason} -> {error, Reason}
   end;
 
+handle_reply(Reply, reload_config = Command, _Options) ->
+  case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
+    ok -> ok;
+    {error, Errors} ->
+      printerr("reload errors:"),
+      lists:foreach(
+        fun({Part, Error}) -> printerr(["  ", Part, ": ", Error]) end,
+        Errors
+      ),
+      {error, 1}
+  end;
+
 handle_reply(Reply, list_jobs = Command, _Options) ->
   case ?ADMIN_COMMAND_MODULE:parse_reply(Reply, Command) of
     {ok, Jobs} -> lists:foreach(fun print_json/1, Jobs), ok;
@@ -727,6 +739,15 @@ println(Line) ->
 print_json(Struct) ->
   {ok, JSON} = indira_json:encode(Struct),
   io:put_chars([JSON, $\n]).
+
+%% @doc Print a string to STDERR, ending it with a new line.
+
+-spec printerr(iolist() | binary()) ->
+  ok.
+
+printerr(Line) ->
+  io:put_chars(standard_error, [Line, $\n]).
+
 %% }}}
 %%----------------------------------------------------------
 
