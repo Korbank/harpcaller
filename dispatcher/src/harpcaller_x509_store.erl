@@ -27,7 +27,7 @@
 -record(state, {
   cert_file :: file:filename(),
   certs :: cert_store(),
-  last_change :: change_time()
+  last_change :: change_time() | undefined
 }).
 
 -type cert_store() :: dict().
@@ -222,9 +222,11 @@ read_certs(File) ->
 
 %% @doc Read the change time of file with known certificates.
 
--spec stat_certs(file:filename()) ->
-  {ok, change_time()} | {error, term()}.
+-spec stat_certs(file:filename() | undefined) ->
+  {ok, change_time() | undefined} | {error, term()}.
 
+stat_certs(undefined = _File) ->
+  {ok, undefined};
 stat_certs(File) ->
   case file:read_file_info(File, [{time, posix}]) of
     {ok, #file_info{mtime = MTime, ctime = CTime}} ->
