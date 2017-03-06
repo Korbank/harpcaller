@@ -12,6 +12,8 @@
 %% public interface
 -export([resolve/1, refresh/0, list/0]).
 -export([format_address/1]).
+%% config reloading
+-export([reopen/0]).
 
 %% supervision tree API
 -export([start/0, start_link/0]).
@@ -68,6 +70,18 @@ refresh() ->
 
 list() ->
   gen_server:call(?MODULE, list_hosts).
+
+%%%---------------------------------------------------------------------------
+%%% config reloading
+%%%---------------------------------------------------------------------------
+
+%% @doc Reopen known hosts database file.
+
+-spec reopen() ->
+  ok | {error, term()}.
+
+reopen() ->
+  gen_server:call(?MODULE, reopen).
 
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
@@ -153,6 +167,17 @@ handle_call(list_hosts = _Request, _From, State = #state{table = Table}) ->
     Table
   ),
   {reply, Result, State};
+
+handle_call(reopen = _Request, _From, State = #state{table = OldTable}) ->
+  {ok, TableFile} = application:get_env(host_db),
+  case dets:open_file(TableFile, [{type, set}]) of
+    {ok, NewTable} ->
+      dets:close(OldTable),
+      NewState = State#state{table = NewTable},
+      {reply, ok, NewState};
+    {error, Reason} ->
+      {reply, {error, Reason}, State}
+  end;
 
 %% unknown calls
 handle_call(Request, From, State) ->

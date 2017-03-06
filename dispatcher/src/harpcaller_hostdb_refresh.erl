@@ -27,8 +27,7 @@
 -define(MAX_LINE, 4096).
 
 -record(state, {
-  command :: string(),
-  interval :: pos_integer(), % seconds
+  timer :: reference(),
   port :: port(),
   result :: dict()
 }).
@@ -74,16 +73,14 @@ start_link() ->
 
 init(_Args) ->
   harpcaller_log:set_context(hostdb_refresh, []),
-  {ok, RefreshCommand} = application:get_env(host_db_script),
-  {ok, RefreshInterval} = application:get_env(host_db_refresh),
-  State = #state{
-    command = RefreshCommand,
-    interval = RefreshInterval,
-    result = dict:new()
-  },
   % it's up to harpcaller_hostdb to decide that hosts database needs immediate
   % refreshing (harpcaller_hostdb can read host_db_refresh on its own)
-  erlang:send_after(RefreshInterval * 1000, self(), refresh),
+  {ok, RefreshInterval} = application:get_env(host_db_refresh),
+  Timer = erlang:send_after(RefreshInterval * 1000, self(), refresh),
+  State = #state{
+    timer = Timer,
+    result = dict:new()
+  },
   {ok, State}.
 
 %% @private
@@ -163,13 +160,18 @@ handle_info({Port, {exit_status, ExitStatus}} = _Message,
   },
   {noreply, NewState};
 
-handle_info(refresh = _Message, State = #state{interval = RefreshInterval}) ->
+handle_info(refresh = _Message, State = #state{timer = OldTimer}) ->
+  erlang:cancel_timer(OldTimer), % just in case it's a fake `refresh' message
   % schedule the next refresh
+  {ok, RefreshInterval} = application:get_env(host_db_refresh),
   harpcaller_log:info("refreshing on schedule", [{schedule, RefreshInterval}]),
-  erlang:send_after(RefreshInterval * 1000, self(), refresh),
+  NewTimer = erlang:send_after(RefreshInterval * 1000, self(), refresh),
   % execute the command or no-op if a command is already running
   Port = execute(State),
-  NewState = State#state{port = Port},
+  NewState = State#state{
+    timer = NewTimer,
+    port = Port
+  },
   {noreply, NewState};
 
 %% unknown messages
@@ -198,7 +200,8 @@ code_change(_OldVsn, State, _Extra) ->
 -spec execute(#state{}) ->
   port().
 
-execute(_State = #state{port = undefined, command = Command}) ->
+execute(_State = #state{port = undefined}) ->
+  {ok, Command} = application:get_env(host_db_script),
   harpcaller_log:info("starting refresh script", [{command, {str, Command}}]),
   open_port({spawn_executable, Command}, [{line, ?MAX_LINE}, in, exit_status]);
 execute(_State = #state{port = Port}) when is_port(Port) ->
