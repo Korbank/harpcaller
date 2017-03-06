@@ -184,7 +184,8 @@ Controlling call jobs
    .. option:: --queue
 
       Along with the running job, list the queue it belongs to (under the
-      ``"queue"`` field).
+      ``"queue"`` field). If the field is ``null``, the job doesn't belong to
+      any queue.
 
 .. program:: harpcallerd info
 

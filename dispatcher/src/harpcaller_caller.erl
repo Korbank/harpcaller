@@ -13,7 +13,8 @@
 
 %% public interface
 -export([call/3, call/4, locate/1]).
--export([cancel/1, get_result/1, follow_stream/1, get_call_info/1]).
+-export([cancel/1, get_result/1, follow_stream/1]).
+-export([get_call_info/1, get_call_queue/1]).
 -export([job_id/1]).
 -export([format_error/1, error_type/1]).
 
@@ -123,6 +124,7 @@ cancel(JobID) when is_list(JobID) ->
         gen_server:call(Pid, cancel)
       catch
         exit:{timeout,_} ->
+          % TODO: clean ETS records
           exit(Pid, cancel), % process hung up, kill it
           ok;
         exit:_ ->
@@ -203,6 +205,17 @@ get_call_info(JobID) ->
       {error, Reason}
   end.
 
+%% @doc Get name of the queue the request belongs to.
+
+-spec get_call_queue(harpcaller:job_id()) ->
+  {ok, harpcaller_call_queue:queue_name()} | undefined.
+
+get_call_queue(JobID) ->
+  case ets:lookup(?ETS_REGISTRY_TABLE, {queue, JobID}) of
+    [{{queue, JobID}, QueueName}] -> {ok, QueueName};
+    [] -> undefined
+  end.
+
 %%%---------------------------------------------------------------------------
 %%% supervision tree API
 %%%---------------------------------------------------------------------------
@@ -258,6 +271,7 @@ init([] = _Args) ->
 terminate(_Arg, _State = #state{job_id = JobID, followers = Followers,
                                 stream_table = StreamTable}) ->
   ets:delete(?ETS_REGISTRY_TABLE, JobID),
+  ets:delete(?ETS_REGISTRY_TABLE, {queue, JobID}),
   ets:delete(?ETS_REGISTRY_TABLE, self()),
   ets:delete(Followers),
   case StreamTable of
@@ -317,6 +331,7 @@ handle_call({start_call, Procedure, ProcArgs, Host, Options} = _Request, From,
         {QueueName, Concurrency} ->
           % enqueue and wait for a message
           harpcaller_log:info("waiting for a queue", [{queue, QueueName}]),
+          ets:insert(?ETS_REGISTRY_TABLE, {{queue, JobID}, QueueName}),
           QRef = harpcaller_call_queue:enqueue(JobID, QueueName, Concurrency),
           NewState = FilledState#state{
             call = {queued, QRef}

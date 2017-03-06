@@ -294,7 +294,7 @@ is_started() ->
 
 list_running_jobs_info() ->
   _Result = [
-    pid_job_info(Pid) ||
+    add_job_queue(pid_job_info(Pid)) ||
     {_,Pid,_,_} <- supervisor:which_children(harpcaller_caller_sup)
   ].
 
@@ -305,7 +305,7 @@ pid_job_info(Pid) ->
   job_info(JobID).
 
 list_recorded_jobs_info() ->
-  _Result = [job_info(JobID) || JobID <- harp_sdb:list()].
+  _Result = [add_job_queue(job_info(JobID)) || JobID <- harp_sdb:list()].
 
 job_info(JobID) ->
   case harpcaller_caller:get_call_info(JobID) of
@@ -327,6 +327,13 @@ job_info(JobID) ->
     undefined ->
       undefined
     % XXX: let it die on other errors
+  end.
+
+add_job_queue(JobInfoRecord) ->
+  JobID = binary_to_list(proplists:get_value(<<"job">>, JobInfoRecord)),
+  case harpcaller_caller:get_call_queue(JobID) of
+    {ok, QueueName} -> [{<<"queue">>, QueueName} | JobInfoRecord];
+    undefined -> [{<<"queue">>, null} | JobInfoRecord]
   end.
 
 format_host_entry({Hostname, Address, Port}) ->
