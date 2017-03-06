@@ -59,6 +59,10 @@ take_over(Socket) ->
   case harpcaller_tcp_worker_sup:spawn_worker(Socket) of
     {ok, Pid} ->
       ok = gen_tcp:controlling_process(Socket, Pid),
+      inet:setopts(Socket, [
+        binary, {packet, line}, {buffer, 1024 * 1024},
+        {active, once}
+      ]),
       {ok, Pid};
     {error, Reason} ->
       gen_tcp:close(Socket),
@@ -101,7 +105,6 @@ init([Socket] = _Args) ->
     {local_address, {str, format_address(LocalAddr, LocalPort)}}
   ]),
   harpcaller_log:info("new connection"),
-  inet:setopts(Socket, [binary, {packet, line}, {active, once}]),
   State = #state{
     socket = Socket
   },
