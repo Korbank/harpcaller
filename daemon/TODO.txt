@@ -5,5 +5,3 @@ time:
 
 == configuration ==
 
-  * default UID/GID
-  * supplementary groups
