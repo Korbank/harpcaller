@@ -37,6 +37,14 @@ parser.add_option(
            " for correctness and exit",
 )
 parser.add_option(
+    "-u", "--default-user", dest = "default_user", default = None,
+    help = "default user to run procedures as", metavar = "USER",
+)
+parser.add_option(
+    "-g", "--default-group", dest = "default_group", default = None,
+    help = "default group to run procedures as", metavar = "GROUP",
+)
+parser.add_option(
     "--syslog", dest = "syslog", action = "store_true", default = False,
     help = "log to syslog instead of STDERR (overriden by --logging)",
 )
@@ -54,8 +62,17 @@ parser.add_option(
 if options.detach:
     options.syslog = True
 
-#if len(args) == 0:
-#    parser.error("argument not provided")
+if options.default_user is not None:
+    try:
+        options.default_user = int(options.default_user)
+    except ValueError:
+        pass
+
+if options.default_group is not None:
+    try:
+        options.default_group = int(options.default_group)
+    except ValueError:
+        pass
 
 # }}}
 #-----------------------------------------------------------------------------
@@ -280,6 +297,13 @@ with harpd.module.ModuleLoader() as loader:
         for (name, obj) in procedures_module.__dict__.items()
         if isinstance(obj, harpd.proc.Procedure)
     }
+
+    if options.default_user is not None or options.default_group is not None:
+        for proc in procedures.values():
+            if proc.uid is None:
+                proc.uid = options.default_user
+            if proc.gid is None:
+                proc.gid = options.default_group
 
     authmod = loader.load(configuration["authentication"]["module"])
     authdb = authmod.create(configuration["authentication"])

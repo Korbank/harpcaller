@@ -44,6 +44,14 @@ Command line options
    test configuration for correctness (config file, procedures module, and
    logging configuration, if provided)
 
+.. option:: -u, --default-user
+
+   default user to run procedures as
+
+.. option:: -g, --default-group
+
+   default group to run procedures as
+
 .. option:: --syslog
 
    log to syslog instead of *STDERR* (overriden by :option:`--logging`)
