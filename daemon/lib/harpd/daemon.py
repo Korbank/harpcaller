@@ -605,17 +605,29 @@ class RequestHandler(SocketServer.BaseRequestHandler, object):
             uid = user.pw_uid
             if gid is None:
                 gid = user.pw_gid
-        if isinstance(gid, (str, unicode)):
-            try:
-                group = grp.getgrnam(gid)
-            except Exception, e:
-                raise RequestHandler.RequestError("system_error", str(e))
-            gid = group.gr_gid
+
+        def getgid(group_name):
+            if isinstance(group_name, (str, unicode)):
+                try:
+                    return grp.getgrnam(group_name).gr_gid
+                except Exception, e:
+                    raise RequestHandler.RequestError("system_error", str(e))
+            elif isinstance(group_name, (int, long)):
+                return group_name
+            else:
+                raise RequestHandler.RequestError("system_error", "invalid group name")
+
+        if gid is None:
+            groups = None
+        elif isinstance(gid, (list, tuple)):
+            groups = [getgid(g) for g in gid]
+        else:
+            groups = [getgid(gid)]
 
         try:
-            if gid is not None:
-                os.setgid(gid)
-                os.setgroups([gid])
+            if groups is not None:
+                os.setgid(groups[0])
+                os.setgroups(groups)
             if uid is not None:
                 os.setuid(uid)
         except OSError, e:

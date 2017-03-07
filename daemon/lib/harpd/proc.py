@@ -93,7 +93,9 @@ Examples of using decorators::
 
    .. attribute:: gid
 
-      GID or group name to run the function as
+      GID or group name to run the function as; can also be a list of
+      names/GIDs to set supplementary groups (the first group will be the
+      primary one)
 
 .. autoclass:: StreamingProcedure
    :members:
@@ -115,7 +117,9 @@ Examples of using decorators::
 
    .. attribute:: gid
 
-      GID or group name to run the function as
+      GID or group name to run the function as; can also be a list of
+      names/GIDs to set supplementary groups (the first group will be the
+      primary one)
 
 '''
 #-----------------------------------------------------------------------------
@@ -127,7 +131,7 @@ class Procedure(object):
     :param timeout: time after which *SIGXCPU* will be sent to the process
         executing the function
     :param uid: user to run the function as
-    :param gid: group to run the function as
+    :param gid: group or list of groups to run the function as
 
     Simple callable wrapper over a function.
     '''
@@ -165,7 +169,7 @@ class StreamingProcedure(Procedure):
     :param timeout: time after which *SIGXCPU* will be sent to the process
         executing the function
     :param uid: user to run the function as
-    :param gid: group to run the function as
+    :param gid: group or list of groups to run the function as
 
     Callable wrapper over a function that produces streamed response using
     ``yield``.
