@@ -889,9 +889,9 @@ class RemoteCall(object):
             metadata.end       = response["time"]["end"]
             metadata.info      = response["info"]
             self._metadata = metadata
-        elif "error" in message:
+        elif "error" in response:
             # {"type": "...", "message": "...", "data": ...}
-            error = message["error"]
+            error = response["error"]
             self._result = RemoteError(
                 error["type"],
                 error["message"],
