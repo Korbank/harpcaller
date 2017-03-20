@@ -158,7 +158,7 @@ so it can be retrieved at a later time.
    for msg in job.follow(recent = 0):
        print msg
 
-The difference between :meth:`job.follow() <harp.RemoteCall.follow()>`
+The difference between :meth:`job.follow() <harp.RemoteCall.follow()>` and
 :meth:`job.stream() <harp.RemoteCall.stream()>` is similar to the difference
 between :meth:`job.get() <harp.RemoteCall.get()>` and :meth:`job.result()
 <harp.RemoteCall.result()>`: the former runs until the job terminates, while
@@ -311,7 +311,7 @@ the remote procedure is raised as :exc:`harp.RemoteException`.
 another :manpage:`harpd(8)` instance, remember not to confuse the container
 classes :class:`harp.Result` and :class:`harpd.proc.Result`. They cannot be
 used interchangeably, though they have similar structure and symmetrical
-purpose.
+purposes.
 
 
 See Also
