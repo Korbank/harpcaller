@@ -5,3 +5,7 @@ time:
 
 == configuration ==
 
+== documentation ==
+
+  * harpcaller(7): interpreting errors
+

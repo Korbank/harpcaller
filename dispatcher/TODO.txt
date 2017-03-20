@@ -21,3 +21,20 @@ time:
 
 == code internals ==
 
+== documentation ==
+
+  * harpcaller(7): interpreting errors
+    * communication with HarpCaller (timeouts, conn reset, bad protocol, ...)
+    * HarpCaller operations (disk errors, unknown host, unknown job)
+    * communication with harpd
+      * nxdomain
+      * IP/TCP/SSL connection problems (timeouts, connection reset, bad
+        protocol, ...)
+      * bad/unrecognized SSL certificate
+      * ACK timeout
+      * timeout/max_exec_time
+      * invalid protocol
+    * harpd operations (unknown procedure, invalid arguments, fork errors,
+      process killed)
+    * exceptions raised by the procedure
+
