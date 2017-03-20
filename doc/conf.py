@@ -59,11 +59,11 @@ pygments_style = 'sphinx'
 man_pages = [
     ('manpages/client', 'harp', 'HarpCaller Python client',
      [], 3),
-    ('manpages/daemon', 'harpd', 'Harp RPC server',
+    ('manpages/daemon', 'harpd', 'RPC server',
      [], 8),
     ('manpages/dispatcher', 'harpcallerd', 'HarpCaller broker daemon',
      [], 8),
-    ('overview', 'harpcaller', 'HarpCaller system overview',
+    ('overview', 'harpcaller', 'system overview',
      [], 7),
 ]
 
