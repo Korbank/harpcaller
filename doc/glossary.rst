@@ -18,10 +18,10 @@ Glossary
     queue
         TODO
 
-    .. glossary::
+        .. glossary::
 
-        concurrency level
-            TODO
+            concurrency level
+                TODO
 
     RPC call
         TODO
@@ -29,24 +29,24 @@ Glossary
     job
         TODO
 
-    .. glossary::
+        .. glossary::
 
-        identifier
-            TODO
+            identifier
+                TODO
 
-        result
-            TODO
+            result
+                TODO
 
-        stream result
-        partial result
-            TODO
+            stream result
+            partial result
+                TODO
 
-        end result
-            TODO
+            end result
+                TODO
 
-        error
-            TODO
+            error
+                TODO
 
-        exception
-            TODO
+            exception
+                TODO
 
