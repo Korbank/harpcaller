@@ -616,7 +616,7 @@ class RemoteProcedure(object):
 class RemoteCall(object):
     '''
     RPC call job representation. Allows to check job's status, retrieve its
-    results (both streamed and returned), and to cancel if it's still running.
+    results (both stream and end result), and to cancel if it's still running.
     '''
 
     #-------------------------------------------------------
@@ -1233,7 +1233,7 @@ class HarpStreamIterator(object):
 
 class Result(object):
     '''
-    :param value: returned end value of a streamed result
+    :param value: returned end result of a streamed result
 
     Container for end result returned from streaming procedure.
 

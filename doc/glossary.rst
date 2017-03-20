@@ -38,9 +38,10 @@ Glossary
             TODO
 
         stream result
+        partial result
             TODO
 
-        returned result
+        end result
             TODO
 
         error

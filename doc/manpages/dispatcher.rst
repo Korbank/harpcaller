@@ -30,7 +30,7 @@ Description
 
 HarpCaller daemon is a service that hails remote :manpage:`harpd(8)`
 instances and records procedures that were called, their arguments, and
-returned results, what allows to check the result of a call at a later time.
+returned values, what allows to check the result of a call at a later time.
 
 HarpCaller was intended mainly for being a call dispatcher and result database
 for a web application, where waiting for a remote procedure to finish in
@@ -349,13 +349,13 @@ Main section
    criteria is accepted. If neither is specified, any certificate is accepted.
 
 ``stream_directory``
-   Directory to store information about call jobs and their results (streamed
-   and returned).
+   Directory to store information about call jobs and their results (stream
+   results and end results).
 
 ``default_timeout``
-   Default timeout (seconds) for waiting for job's activity (either returned
-   result or next packet from streamed result). Request may specify longer
-   timeout if needed.
+   Default timeout (seconds) for waiting for job's activity (either end result
+   or next packet from streamed result). Request may specify longer timeout if
+   needed.
 
 ``max_exec_time``
    Maximum time (seconds) the job can take. Any job longer than this will be
