@@ -892,7 +892,8 @@ class RemoteCall(object):
         elif "error" in response:
             # {"type": "...", "message": "...", "data": ...}
             error = response["error"]
-            self._result = RemoteError(
+            self._has_result = True
+            self._metadata = self._result = RemoteError(
                 error["type"],
                 error["message"],
                 error.get("data"),
@@ -907,6 +908,8 @@ class RemoteCall(object):
         '''
         if self._metadata is None:
             self._get_metadata()
+        if isinstance(self._metadata, HarpException):
+            raise self._metadata
         return self._metadata.procedure
 
     def args(self):
@@ -917,6 +920,8 @@ class RemoteCall(object):
         '''
         if self._metadata is None:
             self._get_metadata()
+        if isinstance(self._metadata, HarpException):
+            raise self._metadata
         return self._metadata.args
 
     def host(self):
@@ -927,6 +932,8 @@ class RemoteCall(object):
         '''
         if self._metadata is None:
             self._get_metadata()
+        if isinstance(self._metadata, HarpException):
+            raise self._metadata
         return self._metadata.host
 
     def submit_time(self):
@@ -937,6 +944,8 @@ class RemoteCall(object):
         '''
         if self._metadata is None:
             self._get_metadata()
+        if isinstance(self._metadata, HarpException):
+            raise self._metadata
         return self._metadata.submitted
 
     def start_time(self):
@@ -948,6 +957,8 @@ class RemoteCall(object):
         '''
         if self._metadata is None:
             self._get_metadata()
+        if isinstance(self._metadata, HarpException):
+            raise self._metadata
         return self._metadata.start
 
     def end_time(self):
@@ -960,6 +971,8 @@ class RemoteCall(object):
         '''
         if self._metadata is None:
             self._get_metadata()
+        if isinstance(self._metadata, HarpException):
+            raise self._metadata
         return self._metadata.end
 
     def info(self):
@@ -973,6 +986,8 @@ class RemoteCall(object):
         '''
         if self._metadata is None:
             self._get_metadata()
+        if isinstance(self._metadata, HarpException):
+            raise self._metadata
         return self._metadata.info
 
     def __repr__(self):
