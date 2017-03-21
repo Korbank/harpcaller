@@ -5,6 +5,9 @@ time:
 
 == configuration ==
 
+  * allow procedures to get authenticated user name and/or client's
+    IP address as an argument
+
 == documentation ==
 
   * harpcaller(7): interpreting errors
