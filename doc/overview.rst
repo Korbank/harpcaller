@@ -1,6 +1,6 @@
-**************************
-High-level system overview
-**************************
+***************
+System overview
+***************
 
 .. toctree::
    :maxdepth: 2
