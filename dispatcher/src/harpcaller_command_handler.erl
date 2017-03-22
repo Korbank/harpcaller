@@ -68,7 +68,7 @@ handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
 handle_command([{<<"command">>, <<"prune_jobs">>},
                 {<<"max_age">>, Age}] = _Command, _Args) ->
   log_info(prune_jobs, "pruning old jobs", [{max_age, Age}]),
-  harp_sdb:remove_older(Age),
+  harp_sdb:remove_older(Age), % TODO: return removed count and error count
   [{result, ok}];
 
 handle_command([{<<"command">>, <<"reopen_logs">>}] = _Command, _Args) ->

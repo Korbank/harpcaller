@@ -277,16 +277,22 @@ info(Handle) ->
 %%   removed unconditionally.
 
 -spec remove_older(integer()) ->
-  ok.
+  {Deleted :: non_neg_integer(), Errors :: non_neg_integer()}.
 
 remove_older(Seconds) ->
   {ok, Directory} = application:get_env(harpcaller, stream_directory),
   OlderThan = timestamp() - Seconds,
-  lists:foreach(
-    fun(F) -> remove_if_older(F, Directory, OlderThan) end,
+  _Result = lists:foldl(
+    fun(F, {Deleted, Errors} = Acc) ->
+      case remove_if_older(F, Directory, OlderThan) of
+        skip -> Acc;
+        ok -> {Deleted + 1, Errors};
+        {error, _} -> {Deleted, Errors + 1}
+      end
+    end,
+    {0, 0},
     filelib:wildcard(?TABLE_FILE_WILDCARD, Directory)
-  ),
-  ok.
+  ).
 
 %% @doc Remove stream log if it's submitted earlier than specified timestamp.
 %%
@@ -295,7 +301,7 @@ remove_older(Seconds) ->
 %%   File that is still opened is not removed.
 
 -spec remove_if_older(file:filename(), file:filename(), integer()) ->
-  any().
+  skip | ok | {error, file:posix()}.
 
 remove_if_older(File, Directory, Timestamp) ->
   case is_still_opened(filename_to_table(File)) of
@@ -304,7 +310,7 @@ remove_if_older(File, Directory, Timestamp) ->
       case submitted_time(FullPath) of
         undefined -> file:delete(FullPath);
         Created when Created =< Timestamp -> file:delete(FullPath);
-        _Created -> ok
+        _Created -> skip
       end;
     true ->
       skip
