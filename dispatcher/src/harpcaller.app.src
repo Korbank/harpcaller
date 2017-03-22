@@ -1,6 +1,6 @@
 {application, harpcaller, [
   {description, "HarpCaller daemon"},
-  {vsn, "0.4.1"}, % remember about `overview.edoc'
+  {vsn, "0.5.0"}, % remember about `overview.edoc'
   {registered, [
     harpcaller_sup,
     harp_sdb_sup,

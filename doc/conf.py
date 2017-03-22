@@ -7,8 +7,8 @@
 project = u'HarpCaller RPC system'
 copyright = u'2016, Korbank S.A.'
 
-release = '0.4.1'
-version = '0.4'
+release = '0.5.0'
+version = '0.5'
 
 #-----------------------------------------------------------------------------
 

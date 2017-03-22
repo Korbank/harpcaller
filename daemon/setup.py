@@ -5,7 +5,7 @@ from glob import glob
 
 setup(
     name = "harpd",
-    version = "0.4.1",
+    version = "0.5.0",
     description = "HarpRPC daemon",
     scripts     = glob("bin/*"),
     packages    = find_packages("lib"),
