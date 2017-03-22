@@ -1,12 +1,15 @@
 Things that would be nice to have, but are not critical for production at this
 time:
 
+== harpd.proc ==
+
+  ? harpd-level locks for procedures ("run only one at a time")
+  * allow procedures to get authenticated user name and/or client's
+    IP address as an argument
+
 == communication with daemon ==
 
 == configuration ==
-
-  * allow procedures to get authenticated user name and/or client's
-    IP address as an argument
 
 == documentation ==
 

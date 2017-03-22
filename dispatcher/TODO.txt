@@ -3,9 +3,10 @@ time:
 
 == job result storage and retention ==
 
-  * listing recorded jobs (including terminated ones)
   * timestamps in stream logs (already collected and stored; bubble it up to
     protocol and client library)
+  * sdb_cleanup logs: include age
+  * sdb_cleanup: remove empty directories
 
 == communication with dispatcher ==
 
