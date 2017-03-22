@@ -38,7 +38,7 @@ init([] = _Args) ->
     {harpcaller_log, {harpcaller_log, start_link, [LogHandlers]},
       permanent, 1000, worker, dynamic},
     {harp_sdb_sup, {harp_sdb_sup, start_link, []},
-      permanent, 1000, worker, [harp_sdb_sup]},
+      permanent, 1000, supervisor, [harp_sdb_sup]},
     {harpcaller_call_sup, {harpcaller_call_sup, start_link, []},
       permanent, 1000, supervisor, [harpcaller_call_sup]},
     {harpcaller_hostdb_sup, {harpcaller_hostdb_sup, start_link, []},
