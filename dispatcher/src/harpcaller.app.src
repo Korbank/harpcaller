@@ -26,6 +26,7 @@
     {host_db_refresh, 900}, % seconds (no more than ~4.3M, but is 49+ days that useful?)
     {default_timeout, 600}, % seconds
     {max_exec_time,   600}, % seconds
+    %{max_age, 2160}, % hours
     {log_handlers, []}, % for harpcaller_log; list of `{Module :: atom(), Args :: term()}'
     %{error_logger_file, ""},
     {listen, [

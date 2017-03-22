@@ -22,6 +22,10 @@ default_timeout = 600
 # terminated [seconds]
 max_exec_time = 600
 
+# maximum age of jobs to keep [hours]; if not specified, jobs are not
+# automatically removed
+#max_age = 2160
+
 #-----------------------------------------------------------------------------
 # SSL options
 

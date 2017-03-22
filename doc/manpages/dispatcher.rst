@@ -362,6 +362,11 @@ Main section
    aborted. Request may specify different execution time, but can't make it
    higher than set in config.
 
+``max_age``
+   Maximum age (hours) of jobs that are remembered. If not specified, jobs are
+   not automatically removed and operator needs to call
+   ``harpcallerd prune-jobs``.
+
 ``host_db``
    Path to a file where hosts registry will store information about known
    hosts, collected from running ``host_db_script``.

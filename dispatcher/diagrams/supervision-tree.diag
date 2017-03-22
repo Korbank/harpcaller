@@ -8,6 +8,7 @@ blockdiag {
   harpcaller_sup -> harpcaller_tcp_sup;
   harpcaller_sup -> harpcaller_call_sup;
   harpcaller_sup -> harp_sdb_sup;
+  harpcaller_sup -> harp_sdb_cleanup;
   harpcaller_sup -> harpcaller_hostdb_sup;
   harpcaller_sup -> harpcaller_log;
   harpcaller_tcp_sup -> harpcaller_tcp_listener;

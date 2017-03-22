@@ -39,6 +39,8 @@ init([] = _Args) ->
       permanent, 1000, worker, dynamic},
     {harp_sdb_sup, {harp_sdb_sup, start_link, []},
       permanent, 1000, supervisor, [harp_sdb_sup]},
+    {harp_sdb_cleanup, {harp_sdb_cleanup, start_link, []},
+      permanent, 1000, worker, [harp_sdb_cleanup]},
     {harpcaller_call_sup, {harpcaller_call_sup, start_link, []},
       permanent, 1000, supervisor, [harpcaller_call_sup]},
     {harpcaller_hostdb_sup, {harpcaller_hostdb_sup, start_link, []},

@@ -445,6 +445,7 @@ configure_harpcaller(GlobalConfig, _Options) ->
     {<<"stream_directory">>,{harpcaller, stream_directory}},
     {<<"default_timeout">>, {harpcaller, default_timeout}},
     {<<"max_exec_time">>,   {harpcaller, max_exec_time}},
+    {<<"max_age">>,         {harpcaller, max_age}},
     {<<"host_db_script">>,  {harpcaller, host_db_script}},
     {<<"ca_file">>,         {harpcaller, ca_file}},
     {<<"known_certs_file">>,{harpcaller, known_certs_file}},
@@ -483,6 +484,9 @@ config_check(<<"default_timeout">> = _Key, _EnvKey, T) when is_integer(T), T > 0
   ok;
 
 config_check(<<"max_exec_time">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
+  ok;
+
+config_check(<<"max_age">> = _Key, _EnvKey, T) when is_integer(T), T > 0 ->
   ok;
 
 config_check(<<"ca_file">> = _Key, _EnvKey, Path) when is_binary(Path) ->
@@ -881,7 +885,8 @@ reset_harpcaller_config() ->
     Key /= host_db_script,
     Key /= host_db_refresh,
     Key /= default_timeout,
-    Key /= max_exec_time
+    Key /= max_exec_time,
+    Key /= max_age
   ],
   DefaultConfig = dict:from_list(harpcaller_default_env()),
   lists:foreach(
@@ -905,6 +910,10 @@ reset_harpcaller_unset_options(Config) ->
   end,
   case proplists:get_value(<<"known_certs_file">>, Config) of
     undefined -> application:unset_env(harpcaller, known_certs_file);
+    _ -> ok
+  end,
+  case proplists:get_value(<<"max_age">>, Config) of
+    undefined -> application:unset_env(harpcaller, max_age);
     _ -> ok
   end,
   ok.
