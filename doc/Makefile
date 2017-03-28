@@ -1,9 +1,5 @@
 #!/usr/bin/make -f
 
-SPHINX_DOCTREE = documentation/doctrees
-SPHINX_SOURCE = documentation
-SPHINX_OUTPUT = documentation/html
-
 SPHINX_DOCTREE = doctrees
 SPHINX_SOURCE = .
 SPHINX_HTML = html
