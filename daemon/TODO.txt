@@ -6,6 +6,9 @@ time:
   ? harpd-level locks for procedures ("run only one at a time")
   * allow procedures to get authenticated user name and/or client's
     IP address as an argument
+    * `info = False' -- default; don't add anything
+    * `info = True' -- insert positional `info' struct as the first argument
+    * `info = "kwarg_name"' -- insert `info' struct as keyword argument
 
 == communication with daemon ==
 
