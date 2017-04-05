@@ -50,6 +50,10 @@ doc-install:
 	mkdir -p $(DESTDIR)/usr/share/doc/harpcaller
 	mkdir -p $(DESTDIR)/usr/share/doc/harpcaller/html
 	cp -R doc/html/* $(DESTDIR)/usr/share/doc/harpcaller/html
+	install -D -m 644 doc/man/harp.3 $(DESTDIR)/usr/share/man/man3/harp.3
+	install -D -m 644 doc/man/harpcaller.7 $(DESTDIR)/usr/share/man/man7/harpcaller.7
+	install -D -m 644 doc/man/harpcallerd.8 $(DESTDIR)/usr/share/man/man8/harpcallerd.8
+	install -D -m 644 doc/man/harpd.8 $(DESTDIR)/usr/share/man/man8/harpd.8
 
 #-----------------------------------------------------------------------------
 # vim:ft=make
