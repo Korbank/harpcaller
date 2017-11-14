@@ -764,11 +764,6 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         self.procedures = procs
         self.authdb = authdb
 
-        # XXX: this needs to be after super(...)
-        # SocketServer.ForkingMixIn inconveniently leaves this as `None'
-        # instead of filling it in constructor
-        self.active_children = []
-
         # necessary to detect if this is the child or parent process, so child
         # won't forward signal to its older siblings
         self.parent_pid = os.getpid()
@@ -813,7 +808,7 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
             logger = logging.getLogger("harpd.daemon.server")
         else:
             logger = logging.getLogger("harpd.daemon.handle_client")
-        if in_parent:
+        if in_parent and self.active_children is not None:
             logger.info(log("received signal, forwarding to children and exiting",
                             signal = signum))
             for pid in self.active_children:
@@ -956,13 +951,14 @@ class SSLServer(SocketServer.ForkingMixIn, SocketServer.BaseServer, object):
         # using `kill_ready' directly, as a child could have terminated
         # already (TimeoutQueue doesn't track these events) and some other
         # process could get the PID
-        for pid in self.active_children:
-            if pid in kill_ready:
-                # TODO: make the children process groups leaders
-                try:
-                    os.kill(pid, signal.SIGXCPU)
-                except OSError:
-                    pass
+        if self.active_children is not None:
+            for pid in self.active_children:
+                if pid in kill_ready:
+                    # TODO: make the children process groups leaders
+                    try:
+                        os.kill(pid, signal.SIGXCPU)
+                    except OSError:
+                        pass
         signal.alarm(1) # schedule another tick
 
 # }}}
