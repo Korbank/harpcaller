@@ -146,9 +146,9 @@ class JSONConnection(object):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         try:
             s.connect((self.host, self.port))
-            self.sockf = s.makefile()
+            self.sockf = s.makefile(mode = "rw")
             s.close()
-        except socket.error, e:
+        except socket.error as e:
             s.close()
             raise CommunicationError(
                 "can't connect to %s:%s: %s" % (self.host, self.port, str(e))
@@ -186,7 +186,7 @@ class JSONConnection(object):
             self.sockf.write(json.dumps(obj))
             self.sockf.write("\n")
             self.sockf.flush()
-        except socket.error, e:
+        except socket.error as e:
             raise CommunicationError(
                 "can't send to %s:%s: %s" % (self.host, self.port, str(e))
             )
@@ -202,7 +202,7 @@ class JSONConnection(object):
             return None
         try:
             return json.loads(line)
-        except ValueError, e:
+        except ValueError as e:
             raise CommunicationError(str(e)) # invalid JSON object
 
 class JSONSSLConnection(JSONConnection):
@@ -243,7 +243,7 @@ class JSONSSLConnection(JSONConnection):
                 ss = ssl.wrap_socket(s)
             self.sockf = ss.makefile()
             s.close()
-        except socket.error, e:
+        except socket.error as e:
             s.close()
             raise CommunicationError(
                 "can't connect to %s:%s: %s" % (self.host, self.port, str(e))
@@ -1176,14 +1176,14 @@ class HarpProcedure(object):
     def _send(self, request):
         try:
             self._sock.send(request)
-        except socket.error, e:
+        except socket.error as e:
             self._close()
             raise CommunicationError(str(e))
 
     def _receive(self):
         try:
             return self._sock.receive()
-        except socket.error, e:
+        except socket.error as e:
             self._close()
             raise CommunicationError(str(e))
 
