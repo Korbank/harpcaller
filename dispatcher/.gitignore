@@ -1,6 +1,8 @@
 .*.swp
 *.beam
 *.plt
+harpcaller.d
+/.erlang.mk
 /ebin/*.app
 /doc/edoc-info
 /doc/*.png

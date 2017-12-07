@@ -16,6 +16,7 @@
     harpcaller_tcp_worker_sup
   ]},
   {applications, [kernel, stdlib, ssl, public_key, crypto]},
+  {modules, []},
   {mod, {harpcaller_app, []}}, % callback module
   {env, [
     %{ca_file, ""},

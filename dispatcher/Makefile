@@ -12,30 +12,33 @@ DIALYZER_OPTS = --no_check_plt $(if $(DIALYZER_PLT),--plts $(DIALYZER_PLT))
 DIAGRAMS = $(basename $(notdir $(wildcard diagrams/*.diag)))
 DIAGRAMS_SVG = $(foreach D,$(DIAGRAMS),doc/images/$D.svg)
 
-ERL_APP_FILE = $(wildcard ebin/*.app)
-ERL_APP_NAME = $(patsubst ebin/%.app,%,$(ERL_APP_FILE))
-ERL_APP_VER = $(shell _install/app_version $(ERL_APP_FILE))
-ERL_INSTALL_PATH = $(shell _install/lib_dir)
-ESCRIPT_ARGS_FILE = /etc/harpcaller/erlang.args
+#-----------------------------------------------------------------------------
+
+PROJECT = harpcaller
+APP_VERSION = $(call app-version,ebin/$(PROJECT).app)
+ERL_INSTALL_LIB_DIR = $(ERL_LIB_DIR)/$(PROJECT)-$(APP_VERSION)
+DOCDIR = /usr/share/doc/harpcaller
+MANDIR = /usr/share/man
+CONFDIR = /etc/harpcaller
+ESCRIPT_ARGS_FILE = $(CONFDIR)/erlang.args
+
+ERLC_OPTS = +debug_info
+EDOC_OPTS := {overview, "src/overview.edoc"}, \
+             {source_path, ["src", "examples"]}, \
+             todo
+ifneq ($(devel),)
+EDOC_OPTS := $(EDOC_OPTS), private
+endif
+
+include erlang.mk
+include erlang.install.mk
+
+src/harp_json_lexer.erl::
+	$(verbose)if ! grep -q @private $@; then echo '%%% @private' > $@.erl_gen_tmp; cat $@ >> $@.erl_gen_tmp; cat $@.erl_gen_tmp > $@; rm -f $@.erl_gen_tmp; fi
 
 #-----------------------------------------------------------------------------
 
-.PHONY: all doc edoc diagrams compile build clean dialyzer
-
-all: compile doc
-
-build: compile
-edoc: doc
-doc: diagrams
-
-compile clean doc:
-	rebar $@
-
-diagrams: $(DIAGRAMS_SVG)
-
-doc/images/%.svg: diagrams/%.diag
-	blockdiag -o $@ -T svg $<
-
+.PHONY: dialyzer
 YECC_ERL_FILES = $(subst .yrl,.erl,$(subst .xrl,.erl,$(wildcard src/*.[xy]rl)))
 ERL_SOURCE_FILES = $(filter-out $(YECC_ERL_FILES),$(wildcard src/*.erl))
 dialyzer:
@@ -44,18 +47,31 @@ dialyzer:
 
 #-----------------------------------------------------------------------------
 
-.PHONY: install
-install:
-	mkdir -p $(DESTDIR)/usr/sbin
-	mkdir -p $(DESTDIR)/etc/harpcaller
-	mkdir -p $(DESTDIR)$(ERL_INSTALL_PATH)/$(ERL_APP_NAME)-$(ERL_APP_VER)/ebin
-	install -m 644 ebin/*.app ebin/*.beam $(DESTDIR)$(ERL_INSTALL_PATH)/$(ERL_APP_NAME)-$(ERL_APP_VER)/ebin
-	sed 's:^%%!.*:%%! -noinput -kernel error_logger silent -args_file $(ESCRIPT_ARGS_FILE):' bin/harpcallerd > $(DESTDIR)/usr/sbin/harpcallerd
-	chmod 755 $(DESTDIR)/usr/sbin/harpcallerd
-	install -m 644 examples/harpcaller.toml $(DESTDIR)/etc/harpcaller/harpcaller.toml.example
+.PHONY: doc
+doc: diagrams edoc
+
+.PHONY: diagrams
+diagrams: $(DIAGRAMS_SVG)
+
+doc/images/%.svg: diagrams/%.diag
+	blockdiag -o $@ -T svg $<
+
+#-----------------------------------------------------------------------------
+
+.PHONY: install install-erlang install-doc
+
+install: install-erlang install-doc
+
+install-erlang: app
+	$(call install-wildcard,644,ebin/*,$(DESTDIR)$(ERL_INSTALL_LIB_DIR)/ebin)
+	$(call install-escript,bin/harpcallerd,$(DESTDIR)/usr/sbin/harpcallerd,-noinput -kernel error_logger silent -args_file $(ESCRIPT_ARGS_FILE))
+	mkdir -p $(DESTDIR)$(CONFDIR)
 	touch $(DESTDIR)$(ESCRIPT_ARGS_FILE)
-	mkdir -p $(DESTDIR)/usr/share/doc/harpcaller/internals
-	cp -R doc $(DESTDIR)/usr/share/doc/harpcaller/internals/html
+	install -m 644 examples/harpcaller.toml $(DESTDIR)$(CONFDIR)/harpcaller.toml.example
+
+install-doc: doc
+	$(call install-wildcard,644,doc/*.html doc/*.png doc/*.css,$(DESTDIR)$(DOCDIR)/erlang-api)
+	$(call install-wildcard,644,doc/images/*.svg,$(DESTDIR)$(DOCDIR)/erlang-api/images)
 
 #-----------------------------------------------------------------------------
 # vim:ft=make
