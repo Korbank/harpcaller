@@ -26,15 +26,15 @@
 
 handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, false}] = _Command,
                _Args) ->
-  case is_started() of
+  case indira:is_started(harpcaller) of
     true  -> [{result, running}];
     false -> [{result, stopped}]
   end;
 handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, true}] = _Command,
                _Args) ->
-  case wait_for_start() of
-    true  -> [{result, running}];
-    false -> [{result, stopped}]
+  case indira:wait_for_start(harpcaller_sup) of
+    ok    -> [{result, running}];
+    error -> [{result, stopped}]
   end;
 
 handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
@@ -44,22 +44,29 @@ handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
 
 handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
   log_info(reload, "reloading configuration", []),
-  case reload_config() of
+  try indira:reload() of
     ok ->
-      case [{N, format_term(E)} || {N, {error, E}} <- reload_processes()] of
-        [] ->
-          unlock_reload(),
-          [{result, ok}];
-        Errors ->
-          unlock_reload(),
-          log_error(reload, "errors when applying new config",
-                    [{errors, Errors}]),
-          [{result, error}, {errors, Errors}]
-      end;
-    {error, Message} ->
-      unlock_reload(),
-      log_error(reload, "config reload error", [{error, Message}]),
-      [{result, error}, {message, Message}]
+      [{result, ok}];
+    {error, reload_not_set} ->
+      [{result, error}, {message, <<"not configured from file">>}];
+    {error, reload_in_progress} ->
+      log_info(reload, "another reload in progress", []),
+      [{result, error}, {message, <<"reload command already in progress">>}];
+    {error, Message} when is_binary(Message) ->
+      log_error(reload, "reload error", [{error, Message}]),
+      [{result, error}, {message, Message}];
+    {error, Errors} when is_list(Errors) ->
+      log_error(reload, "reload errors", [{errors, Errors}]),
+      [{result, error}, {errors, Errors}]
+  catch
+    Type:Error ->
+      % XXX: this crash should never happen and is a programming error
+      log_error(reload, "reload crash", [
+        {crash, Type}, {error, {term, Error}},
+        {stack_trace, indira:format_stacktrace(erlang:get_stacktrace())}
+      ]),
+      [{result, error},
+        {message, <<"reload function crashed, check logs for details">>}]
   end;
 
 %%----------------------------------------------------------
@@ -73,14 +80,22 @@ handle_command([{<<"command">>, <<"prune_jobs">>},
 
 handle_command([{<<"command">>, <<"reopen_logs">>}] = _Command, _Args) ->
   log_info(reopen_logs, "reopening log files", []),
-  case reopen_error_logger_file() of
-    ok ->
-      log_info(reopen_logs, "reopened log for error_logger", []),
-      [{result, ok}];
-    {error, Message} ->
-      log_error(reopen_logs, "error_logger reopen error",
-                [{error, Message}]),
-      [{result, error}, {message, Message}]
+  case application:get_env(harpcaller, error_logger_file) of
+    {ok, Path} ->
+      case indira_disk_h:reopen(error_logger, Path) of
+        ok ->
+          [{result, ok}];
+        {error, Reason} ->
+          Message = iolist_to_binary([
+            "can't open ", Path, ": ", indira_disk_h:format_error(Reason)
+          ]),
+          log_error(reopen_logs, "error_logger reopen error",
+                    [{error, Message}]),
+          [{result, error}, {message, Message}]
+      end;
+    undefined ->
+      indira_disk_h:remove(error_logger),
+      [{result, ok}]
   end;
 
 %%----------------------------------------------------------
@@ -151,7 +166,7 @@ handle_command([{<<"command">>, <<"cancel_queue">>},
 
 handle_command([{<<"command">>, <<"dist_start">>}] = _Command, _Args) ->
   log_info(dist_start, "starting Erlang networking", []),
-  case indira_app:distributed_start() of
+  case indira:distributed_start() of
     ok ->
       [{result, ok}];
     {error, Reason} ->
@@ -162,7 +177,7 @@ handle_command([{<<"command">>, <<"dist_start">>}] = _Command, _Args) ->
 
 handle_command([{<<"command">>, <<"dist_stop">>}] = _Command, _Args) ->
   log_info(dist_stop, "stopping Erlang networking", []),
-  case indira_app:distributed_stop() of
+  case indira:distributed_stop() of
     ok ->
       [{result, ok}];
     {error, Reason} ->
@@ -275,23 +290,6 @@ hardcoded_reply(daemon_stopped = _Reply) ->
 %%% helper functions
 %%%---------------------------------------------------------------------------
 
-wait_for_start() ->
-  % XXX: this will wait until the children of top-level supervisor all
-  % started (and each child supervisor waits for its children, transitively)
-  % or the supervisor shuts down due to an error
-  try supervisor:which_children(harpcaller_sup) of
-    _ -> true
-  catch
-    _:_ -> false
-  end.
-
-is_started() ->
-  % `{AppName :: atom(), Desc :: string(), Version :: string()}' or `false';
-  % only non-false when the application started successfully (it's still
-  % `false' during boot time)
-  AppEntry = lists:keyfind(harpcaller, 1, application:which_applications()),
-  AppEntry /= false.
-
 list_running_jobs_info() ->
   _Result = [
     add_job_queue(pid_job_info(Pid)) ||
@@ -361,74 +359,7 @@ format_address(Address) when is_list(Address) ->
   list_to_binary(Address).
 
 %%%---------------------------------------------------------------------------
-%%% reopening log files
-
--spec reopen_error_logger_file() ->
-  ok | {error, binary()}.
-
-reopen_error_logger_file() ->
-  case application:get_env(harpcaller, error_logger_file) of
-    {ok, File} ->
-      case indira_disk_h:reopen(error_logger, File) of
-        ok ->
-          ok;
-        {error, Reason} ->
-          Message = [
-            "can't open ", File, ": ", indira_disk_h:format_error(Reason)
-          ],
-          {error, iolist_to_binary(Message)}
-      end;
-    undefined ->
-      % it's OK not to find this handler
-      indira_disk_h:remove(error_logger),
-      ok
-  end.
-
-%%%---------------------------------------------------------------------------
-
--spec reload_config() ->
-  ok | {error, binary()}.
-
-reload_config() ->
-  try register('$harpcaller_admin_reload_config', self()) of
-    true ->
-      case application:get_env(harpcaller, configure) of
-        {ok, {Module, Function, Args}} ->
-          case apply(Module, Function, Args) of
-            ok -> ok;
-            {error, Message} when is_binary(Message) -> {error, Message};
-            % in case some error slipped in in raw form
-            {error, Reason} -> {error, format_term(Reason)}
-          end;
-        undefined ->
-          {error, <<"not configured from file">>}
-      end
-  catch
-    error:badarg ->
-      {error, <<"reload command already in progress">>}
-  end.
-
-unlock_reload() ->
-  unregister('$harpcaller_admin_reload_config'),
-  ok.
-
--spec reload_processes() ->
-  [{Part, Result}]
-  when Part :: dist_erl | error_logger | logger
-             | tcp_listen | x509_store | hostdb,
-       Result :: ok | {error, term()}.
-
-reload_processes() ->
-  {ok, LogHandlers} = application:get_env(harpcaller, log_handlers),
-  _Results = [
-    %{dist_erl, ...}, % already reloaded when config was applied
-    {error_logger, reopen_error_logger_file()},
-    {logger,     harpcaller_log:reload(LogHandlers)},
-    {tcp_listen, harpcaller_tcp_sup:reload()},
-    {x509_store, harpcaller_x509_store:reload()},
-    {hostdb,     harpcaller_hostdb:reopen()}
-  ].
-
+%%% operations logging
 %%%---------------------------------------------------------------------------
 
 -spec log_info(atom(), harpcaller_log:event_message(),
@@ -444,14 +375,6 @@ log_info(Command, Message, Context) ->
 
 log_error(Command, Message, Context) ->
   harpcaller_log:warn(command, Message, Context ++ [{command, {term, Command}}]).
-
--spec format_term(any()) ->
-  binary().
-
-format_term(Term) when is_binary(Term) ->
-  Term;
-format_term(Term) ->
-  iolist_to_binary(io_lib:print(Term, 1, 16#ffffffff, -1)).
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

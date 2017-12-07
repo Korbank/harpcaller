@@ -24,12 +24,12 @@ main(Args) ->
     ?DEFAULT_SOCKET_PATH,
     ?DEFAULT_CONFIG_FILE
   ],
-  case indira_cli:execute(Args, harpcaller_cli_handler, DefaultPaths) of
+  case gen_indira_cli:execute(Args, harpcaller_cli_handler, DefaultPaths) of
     ok ->
       ok;
     help ->
       help();
-    {error, {arguments, _} = Reason} ->
+    {error, {help, Reason}} ->
       Message = harpcaller_cli_handler:format_error(Reason),
       io:put_chars(standard_error, [Message, "\n\n"]),
       help(standard_error),
