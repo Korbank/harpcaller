@@ -40,7 +40,11 @@ harp-clean daemon-clean dispatcher-clean:
 .PHONY: doc html man doc-install doc-clean
 doc: html man
 
-html man:
+html:
+	$(MAKE) -C doc $@
+	$(MAKE) -C dispatcher doc
+
+man:
 	$(MAKE) -C doc $@
 
 doc-clean:
@@ -54,6 +58,7 @@ doc-install:
 	install -D -m 644 doc/man/harpcaller.7 $(DESTDIR)/usr/share/man/man7/harpcaller.7
 	install -D -m 644 doc/man/harpcallerd.8 $(DESTDIR)/usr/share/man/man8/harpcallerd.8
 	install -D -m 644 doc/man/harpd.8 $(DESTDIR)/usr/share/man/man8/harpd.8
+	$(MAKE) -C dispatcher install-doc DESTDIR=$(DESTDIR)
 
 #-----------------------------------------------------------------------------
 # vim:ft=make

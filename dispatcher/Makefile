@@ -60,7 +60,7 @@ doc/images/%.svg: diagrams/%.diag
 
 .PHONY: install install-erlang install-doc
 
-install: install-erlang install-doc
+install: install-erlang
 
 install-erlang: app
 	$(call install-wildcard,644,ebin/*,$(DESTDIR)$(ERL_INSTALL_LIB_DIR)/ebin)
